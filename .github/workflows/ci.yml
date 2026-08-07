@@ -1,0 +1,189 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  repository:
+    name: repository checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate version and explicit release decision
+        shell: bash
+        run: |
+          bash scripts/release-readiness.sh --check
+          bash scripts/pilot-readiness.sh --check
+
+      - name: Validate shell syntax
+        shell: bash
+        run: bash -n ./*.sh scripts/*.sh scripts/lib/*.sh tests/*.sh
+
+      - name: Validate Python hook syntax
+        shell: bash
+        run: |
+          python3 -m py_compile \
+            plugins/personal-model-context/scripts/context_hook.py \
+            tests/fixtures/fake-persome-mcp.py
+
+      - name: Test Personal Card contracts and browser flows
+        working-directory: apps/personal-card
+        shell: bash
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm test
+          npm run test:browser
+          npm run test:production-browser
+
+      - name: Lint shell scripts
+        shell: bash
+        run: shellcheck -x ./*.sh scripts/*.sh scripts/lib/*.sh tests/*.sh
+
+      - name: Lint GitHub Actions workflows
+        shell: bash
+        run: |
+          actionlint_root="$(mktemp -d "${RUNNER_TEMP}/actionlint.XXXXXX")"
+          actionlint_archive="actionlint_1.7.12_linux_amd64.tar.gz"
+          curl \
+            --fail \
+            --location \
+            --retry 3 \
+            --retry-delay 2 \
+            --retry-all-errors \
+            --silent \
+            --show-error \
+            --output "${actionlint_root}/${actionlint_archive}" \
+            "https://github.com/rhysd/actionlint/releases/download/v1.7.12/${actionlint_archive}"
+          printf '%s  %s\n' \
+            '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8' \
+            "${actionlint_root}/${actionlint_archive}" \
+            | sha256sum --check
+          tar -xzf \
+            "${actionlint_root}/${actionlint_archive}" \
+            -C "${actionlint_root}"
+          "${actionlint_root}/actionlint" \
+            .github/workflows/ci.yml \
+            .github/workflows/release.yml \
+            .github/workflows/pilot-gate.yml
+
+      - name: Scan source and history for secrets
+        shell: bash
+        run: bash scripts/scan-secrets.sh --repository --self-test
+
+      - name: Validate installer plan
+        shell: bash
+        run: |
+          bash install.sh --print-plan
+          bash update.sh --print-plan
+          bash uninstall-runtime.sh --print-plan
+          bash scripts/github-repository-controls.sh \
+            --plan \
+            --repository "${GITHUB_REPOSITORY}" \
+            --release-actor user:release-owner \
+            --release-reviewer team:release-reviewers
+
+      - name: Verify pinned Runtime
+        shell: bash
+        run: bash scripts/validate-runtime-lock.sh
+
+      - name: Build candidate release assets
+        shell: bash
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          bash scripts/build-release-assets.sh \
+            --repository "${GITHUB_REPOSITORY}" \
+            --tag "v${version}" \
+            --commit "${GITHUB_SHA}" \
+            --source-ref HEAD \
+            --output-directory "${RUNNER_TEMP}/release-assets"
+          repository_name="${GITHUB_REPOSITORY#*/}"
+          mkdir "${RUNNER_TEMP}/release-secret-scan"
+          tar -xzf \
+            "${RUNNER_TEMP}/release-assets/${repository_name}-${version}.tar.gz" \
+            -C "${RUNNER_TEMP}/release-secret-scan"
+          bash scripts/scan-secrets.sh \
+            --directory \
+            "${RUNNER_TEMP}/release-secret-scan/${repository_name}-${version}"
+
+  macos:
+    name: macOS prerequisites (${{ matrix.architecture }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            architecture: arm64
+          - runner: macos-15-intel
+            architecture: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify runner architecture
+        shell: bash
+        env:
+          EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
+        run: |
+          actual_architecture="$(uname -m)"
+          if [[ "${actual_architecture}" != "${EXPECTED_ARCHITECTURE}" ]]; then
+            printf 'Expected %s, found %s.\n' \
+              "${EXPECTED_ARCHITECTURE}" "${actual_architecture}" >&2
+            exit 1
+          fi
+
+      - name: Validate shell syntax
+        shell: bash
+        run: bash -n ./*.sh scripts/*.sh scripts/lib/*.sh tests/*.sh
+
+      - name: Foundation regression tests
+        shell: bash
+        run: bash tests/foundation.sh
+
+      - name: Verify host prerequisites
+        shell: bash
+        run: bash install.sh --check
+
+      - name: Validate installer plan
+        shell: bash
+        run: bash install.sh --print-plan
+
+  macos-install:
+    name: macOS isolated install (arm64)
+    needs: repository
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify runner architecture
+        shell: bash
+        run: test "$(uname -m)" = "arm64"
+
+      - name: Install, diagnose, and preserve-data uninstall
+        shell: bash
+        run: bash scripts/smoke-install.sh --uninstall-via-receipt

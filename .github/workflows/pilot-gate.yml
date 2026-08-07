@@ -1,0 +1,28 @@
+name: Pilot invitation gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  attestations: read
+  contents: read
+
+jobs:
+  pilot-gate:
+    name: verify immutable release before 5-user pilot
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the reviewed rollout decision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify the live release and pilot decision
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash scripts/pilot-readiness.sh \
+            --require-pilot-go \
+            --repository "${GITHUB_REPOSITORY}"

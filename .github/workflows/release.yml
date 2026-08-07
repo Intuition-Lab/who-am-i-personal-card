@@ -1,0 +1,369 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: validate and build release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tag and product version
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          bash scripts/release-readiness.sh --require-go
+
+          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+            printf 'Release must run from a tag, found %s.\n' "${GITHUB_REF_TYPE}" >&2
+            exit 1
+          fi
+
+          version="$(cat VERSION)"
+          if [[ "${GITHUB_REF_NAME}" != "v${version}" ]]; then
+            printf 'Tag %s does not match VERSION %s.\n' \
+              "${GITHUB_REF_NAME}" "${version}" >&2
+            exit 1
+          fi
+          if [[ "$(git rev-parse HEAD)" != "${GITHUB_SHA}" ]]; then
+            printf 'Checked-out commit does not match the tag event commit.\n' >&2
+            exit 1
+          fi
+          git fetch --no-tags origin \
+            "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+          if ! git merge-base --is-ancestor \
+            "${GITHUB_SHA}" "refs/remotes/origin/${DEFAULT_BRANCH}"; then
+            printf 'Tag commit is not reachable from the protected default branch.\n' >&2
+            exit 1
+          fi
+
+      - name: Validate repository and Runtime lock
+        shell: bash
+        run: |
+          bash -n ./*.sh scripts/*.sh scripts/lib/*.sh tests/*.sh
+          bash install.sh --print-plan
+          bash update.sh --print-plan
+          bash uninstall-runtime.sh --print-plan
+          bash scripts/github-repository-controls.sh \
+            --plan \
+            --repository "${GITHUB_REPOSITORY}" \
+            --release-actor user:release-owner \
+            --release-reviewer team:release-reviewers
+          bash scripts/validate-runtime-lock.sh
+
+      - name: Build the exact release assets
+        shell: bash
+        run: |
+          bash scripts/build-release-assets.sh \
+            --repository "${GITHUB_REPOSITORY}" \
+            --tag "${GITHUB_REF_NAME}" \
+            --commit "${GITHUB_SHA}" \
+            --source-ref HEAD \
+            --output-directory dist
+
+      - name: Scan source, complete history, and exact release archive
+        shell: bash
+        run: |
+          repository_name="${GITHUB_REPOSITORY#*/}"
+          version="${GITHUB_REF_NAME#v}"
+          bundle_name="${repository_name}-${version}.tar.gz"
+          mkdir release-secret-scan
+          tar -xzf "dist/${bundle_name}" -C release-secret-scan
+          bash scripts/scan-secrets.sh \
+            --repository \
+            --self-test \
+            --directory "release-secret-scan/${repository_name}-${version}"
+
+      - name: Upload verified release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-assets
+          path: |
+            dist/*.tar.gz
+            dist/RELEASE-METADATA.txt
+            dist/RELEASE-NOTES.md
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+
+  macos-install:
+    name: isolated install (${{ matrix.architecture }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            architecture: arm64
+          - runner: macos-15-intel
+            architecture: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - name: Download the built release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-assets
+          path: dist
+
+      - name: Verify runner architecture
+        shell: bash
+        env:
+          EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
+        run: |
+          actual_architecture="$(uname -m)"
+          if [[ "${actual_architecture}" != "${EXPECTED_ARCHITECTURE}" ]]; then
+            printf 'Expected %s, found %s.\n' \
+              "${EXPECTED_ARCHITECTURE}" "${actual_architecture}" >&2
+            exit 1
+          fi
+
+      - name: Verify and extract the exact release bundle
+        shell: bash
+        run: |
+          repository_name="${GITHUB_REPOSITORY#*/}"
+          version="${GITHUB_REF_NAME#v}"
+          bundle_name="${repository_name}-${version}.tar.gz"
+
+          test "$(find dist -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 4
+          (
+            cd dist
+            shasum -a 256 --check SHA256SUMS
+          )
+          mkdir extracted
+          tar -xzf "dist/${bundle_name}" -C extracted
+          test -x "extracted/${repository_name}-${version}/scripts/smoke-install.sh"
+
+      - name: Install, diagnose, and recover a late failed installation
+        shell: bash
+        run: |
+          repository_name="${GITHUB_REPOSITORY#*/}"
+          version="${GITHUB_REF_NAME#v}"
+          cd "extracted/${repository_name}-${version}"
+          bash tests/foundation.sh
+          bash scripts/smoke-install.sh --uninstall-via-intent
+
+  publish:
+    name: publish GitHub release
+    needs: [build, macos-install]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: github-release
+    permissions:
+      actions: read
+      attestations: read
+      contents: write
+      deployments: read
+    steps:
+      - name: Create scoped repository-control token
+        id: repository-control-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.REPOSITORY_CONTROL_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPOSITORY_CONTROL_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-administration: write
+          permission-checks: read
+          permission-contents: read
+          permission-environments: read
+
+      - name: Check out tagged control source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download verified release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-assets
+          path: dist
+
+      - name: Reverify release assets
+        shell: bash
+        run: |
+          repository_name="${GITHUB_REPOSITORY#*/}"
+          version="${GITHUB_REF_NAME#v}"
+          bundle_name="${repository_name}-${version}.tar.gz"
+
+          test -f "dist/${bundle_name}"
+          test -f dist/RELEASE-METADATA.txt
+          test -f dist/RELEASE-NOTES.md
+          test -f dist/SHA256SUMS
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 4
+          (
+            cd dist
+            sha256sum --check SHA256SUMS
+          )
+          grep -Fxq "repository=${GITHUB_REPOSITORY}" dist/RELEASE-METADATA.txt
+          grep -Fxq "tag=${GITHUB_REF_NAME}" dist/RELEASE-METADATA.txt
+          grep -Fxq "commit=${GITHUB_SHA}" dist/RELEASE-METADATA.txt
+          grep -Fxq "version=${version}" dist/RELEASE-METADATA.txt
+          grep -Fxq "release_status=GO" dist/RELEASE-METADATA.txt
+          grep -Fxq "pilot_status=HOLD" dist/RELEASE-METADATA.txt
+
+      - name: Verify live repository release controls
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.repository-control-token.outputs.token }}
+          RELEASE_ACTOR: ${{ vars.RELEASE_ACTOR }}
+          RELEASE_REVIEWER: ${{ vars.RELEASE_REVIEWER }}
+          PRIVATE_ENTERPRISE: ${{ vars.REPOSITORY_PRIVATE_ENTERPRISE }}
+        run: |
+          test -n "${RELEASE_ACTOR}"
+          test -n "${RELEASE_REVIEWER}"
+          control_arguments=(
+            --check
+            --repository "${GITHUB_REPOSITORY}"
+            --release-actor "${RELEASE_ACTOR}"
+            --release-reviewer "${RELEASE_REVIEWER}"
+          )
+          if [[ "${PRIVATE_ENTERPRISE}" == "true" ]]; then
+            control_arguments+=(--private-enterprise)
+          fi
+          bash scripts/github-repository-controls.sh "${control_arguments[@]}"
+
+      - name: Require immutable GitHub Releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.repository-control-token.outputs.token }}
+        run: |
+          if ! immutable="$(
+            gh api \
+              --header "X-GitHub-Api-Version: 2026-03-10" \
+              "/repos/${GITHUB_REPOSITORY}/immutable-releases" \
+              --jq '.enabled'
+          )"; then
+            printf '%s\n' \
+              'Repository immutable releases are not enabled.' \
+              'Enable them before approving the github-release environment.' >&2
+            exit 1
+          fi
+          if [[ "${immutable}" != "true" ]]; then
+            printf 'Repository immutable releases must report enabled=true.\n' >&2
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          repository_name="${GITHUB_REPOSITORY#*/}"
+          version="${GITHUB_REF_NAME#v}"
+          bundle_name="${repository_name}-${version}.tar.gz"
+          release_flags=()
+          if [[ "${version}" == *-* ]]; then
+            release_flags+=(--prerelease)
+          fi
+
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            printf '%s\n' \
+              "Release ${GITHUB_REF_NAME} already exists." \
+              'It will be accepted only if it is immutable and byte-for-byte' \
+              'identical to this workflow run; no asset will be overwritten.'
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              "dist/${bundle_name}" \
+              dist/RELEASE-METADATA.txt \
+              dist/RELEASE-NOTES.md \
+              dist/SHA256SUMS \
+              --title "${GITHUB_REF_NAME}" \
+              --notes-file dist/RELEASE-NOTES.md \
+              --verify-tag \
+              "${release_flags[@]}"
+          fi
+
+          published_immutable="false"
+          published_asset_count="0"
+          published_prerelease=""
+          for attempt in {1..12}; do
+            IFS=$'\t' read -r \
+              published_immutable published_asset_count published_prerelease <<<"$(
+                gh api \
+                  --header "X-GitHub-Api-Version: 2026-03-10" \
+                  "/repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" \
+                  --jq '[.immutable, (.assets | length), .prerelease] | @tsv'
+              )"
+            if [[ "${published_immutable}" == "true" \
+              && "${published_asset_count}" -eq 4 ]]; then
+              break
+            fi
+            if [[ "${attempt}" -lt 12 ]]; then
+              sleep 5
+            fi
+          done
+          if [[ "${published_immutable}" != "true" ]]; then
+            printf 'Published release did not become immutable.\n' >&2
+            exit 1
+          fi
+          if [[ "${published_asset_count}" -ne 4 ]]; then
+            printf 'Published release does not contain exactly four assets.\n' >&2
+            exit 1
+          fi
+          expected_prerelease="false"
+          if [[ "${version}" == *-* ]]; then
+            expected_prerelease="true"
+          fi
+          if [[ "${published_prerelease}" != "${expected_prerelease}" ]]; then
+            printf 'Published release prerelease state is incorrect.\n' >&2
+            exit 1
+          fi
+
+          actual_asset_names="$(
+            gh api \
+              --header "X-GitHub-Api-Version: 2026-03-10" \
+              "/repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" \
+              --jq '.assets[].name' \
+              | sort
+          )"
+          expected_asset_names="$(
+            printf '%s\n' \
+              "${bundle_name}" \
+              RELEASE-METADATA.txt \
+              RELEASE-NOTES.md \
+              SHA256SUMS \
+              | sort
+          )"
+          if [[ "${actual_asset_names}" != "${expected_asset_names}" ]]; then
+            printf 'Published release asset names are not the exact approved set.\n' \
+              >&2
+            exit 1
+          fi
+
+          mkdir published-release
+          (
+            cd published-release
+            gh release download "${GITHUB_REF_NAME}" \
+              --pattern "${bundle_name}" \
+              --pattern "RELEASE-METADATA.txt" \
+              --pattern "RELEASE-NOTES.md" \
+              --pattern "SHA256SUMS"
+            test "$(find . -maxdepth 1 -type f | wc -l)" -eq 4
+            gh release verify "${GITHUB_REF_NAME}"
+            for asset_name in \
+              "${bundle_name}" RELEASE-METADATA.txt RELEASE-NOTES.md SHA256SUMS; do
+              gh release verify-asset "${GITHUB_REF_NAME}" "${asset_name}"
+              cmp "${asset_name}" "../dist/${asset_name}"
+            done
+            sha256sum --check SHA256SUMS
+          )
