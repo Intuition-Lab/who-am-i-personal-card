@@ -60,7 +60,7 @@ the repository CI and isolated Apple Silicon installation test:
 ```bash
 (
   set -euo pipefail
-  SOURCE_COMMIT="1da0d285176a25d09debc828c527d9ace3b34e02"
+  SOURCE_COMMIT="e909d93c4e5b85744e3e06af70006d5eb7b2fa05"
   CHECKOUT_DIRECTORY="$(
     mktemp -d "${TMPDIR:-/tmp}/who-am-i-personal-card.XXXXXX"
   )"
