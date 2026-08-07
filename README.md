@@ -33,6 +33,33 @@ GitHub Release until a release owner records a reviewed `GO` decision.
 - The Runtime installer does not modify Claude, Codex, Cursor, or other MCP
   client configurations. The Codex plugin is a separate, explicit install.
 
+## Install the current tested source candidate
+
+The following command installs the exact public source revision that passed
+the repository CI and isolated Apple Silicon installation test:
+
+```bash
+(
+  set -euo pipefail
+  SOURCE_COMMIT="5851edce1960b6e4cb536b4db90d5b136416b304"
+  CHECKOUT_DIRECTORY="$(
+    mktemp -d "${TMPDIR:-/tmp}/who-am-i-personal-card.XXXXXX"
+  )"
+  git clone \
+    https://github.com/Intuition-Lab/who-am-i-personal-card.git \
+    "${CHECKOUT_DIRECTORY}"
+  cd "${CHECKOUT_DIRECTORY}"
+  git checkout --detach "${SOURCE_COMMIT}"
+  bash install.sh --interactive
+)
+```
+
+The application is currently unsigned and unnotarized. macOS may ask the user
+to confirm opening it, and Accessibility and Screen Recording permissions must
+be approved by the signed-in user. On first launch, the user creates their own
+local Card profile and connects the owner-local Personal Model; production
+never registers the Cecilia or Lin development fixtures.
+
 ## Install an immutable release
 
 ```bash
