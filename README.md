@@ -11,13 +11,25 @@ local model.
 Cecilia and Lin exist only as explicit development fixtures and are never
 registered by a production launch.
 
-The release includes the Card UI, a pinned private Node.js runtime, the
+The source candidate includes the Card UI, a pinned private Node.js runtime, the
 reproducible Persome Runtime installer, verification and support tooling, and
 an optional Codex plugin that recalls relevant Personal Model context on every
 turn.
 
 `RELEASE_STATUS` is currently `HOLD`. Tagging this candidate cannot publish a
 GitHub Release until a release owner records a reviewed `GO` decision.
+There is currently no Who Am I GitHub Release or release tag; the tested source
+install below is the only public installation path. The immutable-release
+command is documented for the later approved release and will return `404`
+until that release exists.
+
+The backend is already public at
+[Intuition-Lab/personal-model](https://github.com/Intuition-Lab/personal-model).
+It is a local Runtime rather than a hosted cloud API. During a fresh install,
+Who Am I anonymously fetches and verifies the exact public commit in
+`runtime.lock`, then installs it under the signed-in user's `~/.persome`.
+Production communicates with that local Runtime over stdio, so one person's
+model database is never bundled into another person's download.
 
 ## Current beta boundary
 
@@ -68,13 +80,13 @@ Mac without an initialized Personal Model keeps the existing profile and
 permission flow. Production never registers the Cecilia or Lin development
 fixtures.
 
-## Install an immutable release
+## Install an immutable release after `RELEASE_STATUS=GO`
 
 ```bash
 (
   set -euo pipefail
   REPOSITORY="Intuition-Lab/who-am-i-personal-card"
-  VERSION="0.1.0-beta.2"
+  VERSION="0.1.0-beta.3"
   REPOSITORY_NAME="${REPOSITORY##*/}"
   RELEASE_BASE="https://github.com/${REPOSITORY}/releases/download/v${VERSION}"
   DOWNLOAD_DIRECTORY="$(
@@ -173,7 +185,7 @@ install the plugin:
 
 ```bash
 codex plugin marketplace add \
-  "Intuition-Lab/who-am-i-personal-card@v0.1.0-beta.2"
+  "Intuition-Lab/who-am-i-personal-card@v0.1.0-beta.3"
 codex plugin add personal-model-context@intuition-lab
 ```
 

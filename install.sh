@@ -203,17 +203,28 @@ install_personal_card() {
   if [[ "${target_ready}" -eq 0 ]]; then
     /bin/mkdir -p "${app_root}" "${staging_root}"
     /bin/chmod 0700 "${app_root}" "${staging_root}"
+    /bin/cp -R "${source_root}/assets" "${staging_root}/"
+    /bin/mkdir -p "${staging_root}/src/providers"
     /bin/cp -R \
-      "${source_root}/assets" \
-      "${source_root}/src" \
-      "${staging_root}/"
+      "${source_root}/src/auth" \
+      "${source_root}/src/client" \
+      "${source_root}/src/connectors" \
+      "${source_root}/src/contracts" \
+      "${source_root}/src/evidence" \
+      "${source_root}/src/setup" \
+      "${staging_root}/src/"
+    /bin/cp \
+      "${source_root}/src/providers/local-persome-provider.mjs" \
+      "${source_root}/src/providers/provider-registry.mjs" \
+      "${source_root}/src/providers/remote-personal-model-provider.mjs" \
+      "${source_root}/src/providers/snapshot-backed-provider.mjs" \
+      "${staging_root}/src/providers/"
     /bin/cp \
       "${source_root}/package.json" \
       "${source_root}/package-lock.json" \
       "${source_root}/persome-card-server.mjs" \
       "${source_root}/whoami-mcp-proxy.mjs" \
       "${source_root}/WhoAmI v5 · Persome Live.html" \
-      "${source_root}/WhoAmI v5 · Offline Replay.html" \
       "${source_root}/打开 Persome Card.command" \
       "${source_root}/设置我的 Personal Model.command" \
       "${staging_root}/"

@@ -12,6 +12,7 @@
     "test": "node --test",
     "test:browser": "npm run build && node tests/browser/runtime-switch.mjs",
     "test:production-browser": "npm run build && node tests/browser/production-owner.mjs",
+    "test:production-no-demo": "node tests/browser/production-fresh-home-no-demo.mjs && node --test tests/release/production-install-payload.test.mjs",
     "test:contract": "node --test tests/contract",
     "visual:baseline": "npm run build && node tests/browser/runtime-switch.mjs --output tests/visual/current"
   },

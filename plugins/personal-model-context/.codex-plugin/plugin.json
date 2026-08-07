@@ -1,6 +1,6 @@
 {
   "name": "personal-model-context",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "description": "Recall relevant owner-local Personal Model context on every Codex turn.",
   "author": {
     "name": "Intuition Lab"

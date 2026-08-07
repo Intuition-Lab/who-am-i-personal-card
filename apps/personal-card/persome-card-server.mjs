@@ -18,7 +18,6 @@ import { ConnectorEventStore } from "./src/connectors/connector-event-store.mjs"
 import { ConnectorSessionService } from "./src/connectors/connector-session-service.mjs";
 import { ReportService } from "./src/connectors/report-service.mjs";
 import { EvidenceService } from "./src/evidence/evidence-service.mjs";
-import { FixtureProvider } from "./src/providers/fixture-provider.mjs";
 import { LocalPersomeProvider } from "./src/providers/local-persome-provider.mjs";
 import { ProviderRegistry } from "./src/providers/provider-registry.mjs";
 import { OWNER_SCOPES } from "./src/auth/scope-policy.mjs";
@@ -56,27 +55,15 @@ const GRANT_AUDIENCE = "personal-card-v5";
 const GRANT_SECRET = process.env.WHOAMI_GRANT_SECRET || randomBytes(48);
 const PERSOME_ROOT = process.env.PERSOME_ROOT || resolve(homedir(), ".persome");
 const allowedCoastFrameIdsByModel = new Map();
-const fixtureProvider = new FixtureProvider();
-const localPersomeProvider = new LocalPersomeProvider({
-  modelIds: ["cecilia"],
-  loadSnapshot: loadLocalCeciliaSnapshot,
-  fallbackProvider: fixtureProvider,
-  operations: {
-    correct: async ({ correction }) => writeLocalCorrection(correction),
-  },
-});
+const developmentModelRuntime = DEV_MODE
+  ? (await import("./src/development/development-model-runtime.mjs"))
+      .createDevelopmentModelRuntime()
+  : null;
 const ownerProfileStore = new OwnerProfileStore({ dataDir: CARD_DATA_DIR });
 let ownerProfile = await ownerProfileStore.load();
 let ownerProfileProvisionPromise = null;
 const providerRegistry = new ProviderRegistry(
-  DEV_MODE
-    ? {
-        cecilia: process.env.WHOAMI_PROVIDER_MODE === "fixture"
-          ? fixtureProvider
-          : localPersomeProvider,
-        "lin-demo": fixtureProvider,
-      }
-    : {},
+  developmentModelRuntime?.providers || {},
 );
 const viewerSessionStore = new ViewerSessionStore({
   cookieName: "whoami_card_session",
@@ -91,11 +78,12 @@ const sessionModelService = new SessionModelService({
   grantTokenService,
   audience: GRANT_AUDIENCE,
   isOwner: async ({ modelId }) =>
-    modelId === ownerProfile?.modelId || (DEV_MODE && modelId === "cecilia"),
+    modelId === ownerProfile?.modelId
+      || developmentModelRuntime?.isOwnerModel(modelId) === true,
   isPubliclyReadable: async ({ modelId }) =>
     modelId === ownerProfile?.modelId
       ? ownerProfile.publiclyReadable === true
-      : DEV_MODE && ["cecilia", "lin-demo"].includes(modelId),
+      : developmentModelRuntime?.isPubliclyReadable(modelId) === true,
 });
 const connectorSessionService = new ConnectorSessionService();
 const connectorEventStore = new ConnectorEventStore({
@@ -660,8 +648,8 @@ function conciseActivityText(value, apps = []) {
   if (/personal card|whoami|who am i|spotlight|proactive|rewind|persome|personal model/i.test(source)) {
     return "继续整理 Personal Card，并完善 Persome 的实时内容与 Rewind 回放。";
   }
-  if (/valse ai|融资|funding|financing|investor/i.test(source)) {
-    return "继续整理 Valse AI 的融资材料与沟通内容。";
+  if (/融资|funding|financing|investor/i.test(source)) {
+    return "继续整理融资材料与沟通内容。";
   }
   if (/campaign|PR\s*\+\s*直播|UGC|KOL|发布节奏|社媒/i.test(source)) {
     return "在飞书讨论发布节奏、社媒与 KOL 的配合。";
@@ -701,7 +689,6 @@ function cleanWindowTitle(value, app) {
     .replace(/\s*[—-]\s*\d{2,4}\s*[×x]\s*\d{2,4}\s*$/i, "")
     .replace(/\s*[—-]\s*caffeinate\b[\s\S]*$/i, "")
     .replace(/\s+-\s+Google Chrome(?:\s+-\s+[^-]+)?$/i, "")
-    .replace(/^zsy\s*[—-]\s*/i, "")
     .replace(/\s+/g, " ")
     .trim();
   if (/inbox\s*\(\d+\).*gmail/i.test(text)) return "Gmail · 收件箱";
@@ -759,7 +746,7 @@ function rangeMinutes(value) {
 function titleFor(text, apps = []) {
   const source = String(text || "");
   if (/personal card|whoami|who am i|v5|v6|卡片/i.test(source)) return "Personal Card · 实时内容";
-  if (/融资|funding|financing|valse ai/i.test(source)) return "Valse AI · 融资文档";
+  if (/融资|funding|financing|investor/i.test(source)) return "融资 · 文档与沟通";
   if (/persome|personal model|personal me/i.test(source)) return "Persome · Personal Model";
   if (/飞书|feishu/i.test(source)) return "飞书 · 文档与协作";
   if (/figma/i.test(source)) return "Figma · 设计";
@@ -886,7 +873,7 @@ async function coastFramesForDay(key) {
   }
 }
 
-async function attachCoastFrames(live, modelId = "cecilia") {
+async function attachCoastFrames(live, modelId = ownerProfile?.modelId || "local-owner") {
   const allowedFrameIds = allowedCoastFrameIdsByModel.get(modelId) || new Set();
   allowedCoastFrameIdsByModel.set(modelId, allowedFrameIds);
   const days = Array.isArray(live?.days) ? live.days.slice(0, 7) : [];
@@ -1410,8 +1397,6 @@ function buildLivePayload(activity, current) {
 
 function compactOwnerAnswer(value) {
   const lines = String(value || "")
-    .replaceAll("我是 You 的", "我是 Cecilia 的")
-    .replaceAll("不是 You 本人", "不是 Cecilia 本人")
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
@@ -1488,15 +1473,10 @@ function sessionPayload(session) {
 }
 
 async function createDevelopmentGrant(modelId) {
-  if (!DEV_MODE || modelId !== "lin-demo") return null;
-  const snapshot = await fixtureProvider.getSnapshot(modelId);
-  const scopes = snapshot.authorization.scopes;
-  return grantTokenService.sign({
-    grantId: `dev_${modelId}_${Date.now()}`,
+  if (!developmentModelRuntime) return null;
+  return developmentModelRuntime.createGrant({
     modelId,
-    scopes,
-    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    audience: GRANT_AUDIENCE,
+    grantTokenService,
   });
 }
 
@@ -1643,7 +1623,7 @@ async function ensureActiveModel(session) {
           : "请完成 Personal Model 的本机权限与初始化",
     );
   }
-  const modelId = ownerProfile?.modelId || (DEV_MODE ? "cecilia" : "");
+  const modelId = ownerProfile?.modelId || developmentModelRuntime?.ownerModelId || "";
   if (!modelId) {
     throw setupRequiredError("PROFILE_REQUIRED", "请先创建你的 Personal Card");
   }
@@ -1660,7 +1640,7 @@ async function serveModels(req, res) {
   sendJson(res, 200, {
     ok: true,
     devMode: DEV_MODE,
-    ownerModelId: ownerProfile?.modelId || (DEV_MODE ? "cecilia" : null),
+    ownerModelId: ownerProfile?.modelId || developmentModelRuntime?.ownerModelId || null,
     models,
   });
 }
@@ -2218,109 +2198,6 @@ async function loadLocalOwnerSnapshot(profile) {
   }
 }
 
-async function loadLocalCeciliaSnapshot() {
-  const base = structuredClone(await fixtureProvider.getSnapshot("cecilia"));
-  const client = await connectPersome();
-  try {
-    const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
-    const safeTool = (name, args) => client.callTool(name, args).catch(() => null);
-    const [memoriesResult, behaviorResult, activityResult, currentResult] = await Promise.all([
-      safeTool("list_memories", {}),
-      safeTool("behavior_patterns", {}),
-      safeTool("recent_activity", {
-        since,
-        limit: 120,
-        prefix_filter: ["event"],
-      }),
-      safeTool("current_context", {
-        timeline_limit: 10,
-        headline_limit: 4,
-        fulltext_limit: 0,
-      }),
-    ]);
-    const memories = parseToolJson(memoriesResult);
-    const behavior = parseToolJson(behaviorResult);
-    const activity = parseToolJson(activityResult);
-    const current = parseToolJson(currentResult);
-    const live = buildLivePayload(activity, current);
-    const files = Array.isArray(memories.files) ? memories.files : [];
-    const sourceFaces = Array.isArray(behavior.faces) ? behavior.faces : [];
-    const faces = sourceFaces.slice(0, 6).map((face, index) => ({
-      id: `face_cecilia_live_${String(index + 1).padStart(2, "0")}`,
-      text: cleanModelText(face.signature || face.text, 260),
-      observations: Math.max(0, Math.round(Number(face.observations) || 0)),
-      confidence: Math.min(1, Math.max(0, Number(face.confidence) || 0)),
-      evidenceRefs: [
-        modelEvidenceRef(
-          "cecilia",
-          "face",
-          face.id || face.signature || index + 1,
-        ),
-      ],
-    })).filter((face) => face.text);
-    const timeDays = (Array.isArray(live.days) ? live.days : []).slice(0, 14)
-      .map((day) => ({
-        id: day.key,
-        title: day.title,
-        portrait: day.portrait || day.narr || "",
-        letter: Array.isArray(day.selfReading?.letter)
-          ? day.selfReading.letter.join("\n")
-          : String(day.letter || ""),
-        events: (Array.isArray(day.events) ? day.events : []).map((event, index) => ({
-          id: `cecilia-live-${day.key}-${String(index + 1).padStart(2, "0")}`,
-          time: event.t || "—",
-          title: event.title || "Personal Model",
-          detail: event.detail || event.io || "",
-          app: String(event.io || "").split(" · ")[0] || "Personal Model",
-          evidenceRef: modelEvidenceRef(
-            "cecilia",
-            "event",
-            event.sourceId || `${day.key}-${index + 1}`,
-          ),
-        })),
-      }))
-      .filter((day) => day.id && day.events.length);
-    const kindMap = {
-      past: "past",
-      present: "present",
-      future: "future",
-      "过去": "past",
-      "现在": "present",
-      "未来": "future",
-    };
-    const nowItems = (Array.isArray(live.nowItems) ? live.nowItems : [])
-      .slice(0, 6)
-      .map((item, index) => ({
-        id: String(item.id || `cecilia-now-${index + 1}`),
-        kind: kindMap[item.kind] || "present",
-        title: String(item.title || "Personal Model"),
-        why: String(item.why || ""),
-        when: String(item.t || item.when || "现在"),
-        ...(item.day ? { dayId: String(item.day) } : {}),
-      }));
-    const updatedAt = files
-      .map((file) => file.updated)
-      .filter((value) => Number.isFinite(Date.parse(value)))
-      .sort()
-      .at(-1) || new Date().toISOString();
-
-    base.model.status = "online";
-    base.personalModel = {
-      memoryCount: Number.isFinite(memories.count)
-        ? Math.max(0, Math.round(memories.count))
-        : files.length,
-      root: rootSummary(behavior?.root?.signature) || base.personalModel.root,
-      faces: faces.length ? faces : base.personalModel.faces,
-      updatedAt,
-    };
-    if (timeDays.length) base.time = { days: timeDays };
-    if (nowItems.length) base.now = { items: nowItems };
-    return base;
-  } finally {
-    client.close();
-  }
-}
-
 async function writeLocalCorrection(correction) {
   const client = await connectPersome();
   try {
@@ -2499,7 +2376,7 @@ async function serveStatic(req, res, url) {
   }
 }
 
-async function serveCoastFrame(res, url, modelId = "cecilia") {
+async function serveCoastFrame(res, url, modelId = ownerProfile?.modelId || "local-owner") {
   const id = String(url.searchParams.get("id") || "");
   if (!/^\d{1,12}$/.test(id)) {
     sendJson(res, 400, { ok: false, error: "无效的 Coast frame" });

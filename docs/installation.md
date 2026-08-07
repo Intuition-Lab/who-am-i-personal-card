@@ -34,10 +34,10 @@ bash install.sh --print-plan
 
 ## Interactive installation
 
-Download all assets from one immutable GitHub Release and verify
-`SHA256SUMS` before extracting its source bundle. The README contains the
-release-asset command template; its repository placeholder must be replaced
-with the approved remote before distribution.
+There is no Who Am I GitHub Release while `RELEASE_STATUS=HOLD`. For the
+current candidate, use the exact tested source commit in the README. After a
+reviewed `GO`, download all assets from one immutable GitHub Release and verify
+`SHA256SUMS` before extracting its source bundle.
 
 Use this after entering the verified extracted directory:
 
@@ -108,7 +108,7 @@ immutable Git tag:
 
 ```bash
 codex plugin marketplace add \
-  "Intuition-Lab/who-am-i-personal-card@v0.1.0-beta.2"
+  "Intuition-Lab/who-am-i-personal-card@v0.1.0-beta.3"
 codex plugin add personal-model-context@intuition-lab
 ```
 

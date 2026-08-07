@@ -52,6 +52,7 @@ jobs:
           npm test
           npm run test:browser
           npm run test:production-browser
+          npm run test:production-no-demo
 
       - name: Lint shell scripts
         shell: bash
