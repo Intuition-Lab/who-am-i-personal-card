@@ -332,11 +332,14 @@ async function connectObservableMcpTarget(agent, binding = {}) {
     "--agent",
     agent,
     "--model",
-    binding.modelId || "cecilia",
+    binding.modelId
+      || ownerProfile?.modelId
+      || developmentModelRuntime?.ownerModelId
+      || "local-owner",
     "--connector-session",
     binding.sessionId || "cs_local_legacy",
     "--grant",
-    binding.grantId || "owner_cecilia_local",
+    binding.grantId || "owner_local_model",
     "--runtime-root",
     RUNTIME_ROOT,
     "--persome-root",
@@ -1828,7 +1831,7 @@ async function connectModelConnector(req, res, url, connectorId) {
   if (
     (
       context.modelId === ownerProfile?.modelId
-      || (DEV_MODE && context.modelId === "cecilia")
+      || developmentModelRuntime?.isOwnerModel(context.modelId)
     )
     && process.env.WHOAMI_PROVIDER_MODE !== "fixture"
     && ["codex", "claude-code"].includes(connectorId)
@@ -1958,6 +1961,9 @@ async function serveModelEvidence(req, res, url, pathReference) {
 }
 
 async function bootstrapPersome(res) {
+  const bootstrapModelId = ownerProfile?.modelId
+    || developmentModelRuntime?.ownerModelId
+    || "local-owner";
   const client = await connectPersome();
   try {
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -1972,7 +1978,10 @@ async function bootstrapPersome(res) {
     const behavior = parseToolJson(behaviorResult);
     const activity = parseToolJson(activityResult);
     const current = parseToolJson(currentResult);
-    let live = await attachCoastFrames(buildLivePayload(activity, current));
+    let live = await attachCoastFrames(
+      buildLivePayload(activity, current),
+      bootstrapModelId,
+    );
     if (Array.isArray(live.days) && live.days.length) {
       await mkdir(dirname(LIVE_CACHE_PATH), { recursive: true });
       await writeFile(LIVE_CACHE_PATH, JSON.stringify(live), "utf8").catch(() => {});
@@ -1984,9 +1993,9 @@ async function bootstrapPersome(res) {
         for (const day of cachedLive.days) {
           for (const frame of day.coastFrames || []) {
             if (frame?.id != null) {
-              const allowedFrameIds = allowedCoastFrameIdsByModel.get("cecilia") || new Set();
+              const allowedFrameIds = allowedCoastFrameIdsByModel.get(bootstrapModelId) || new Set();
               allowedFrameIds.add(String(frame.id));
-              allowedCoastFrameIdsByModel.set("cecilia", allowedFrameIds);
+              allowedCoastFrameIdsByModel.set(bootstrapModelId, allowedFrameIds);
             }
           }
         }

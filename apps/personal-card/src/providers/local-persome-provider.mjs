@@ -11,7 +11,7 @@ import {
 
 export class LocalPersomeProvider extends SnapshotBackedPersonalModelProvider {
   constructor({
-    modelIds = ["cecilia"],
+    modelIds = [],
     loadSnapshot,
     fallbackProvider,
     operations = {},
