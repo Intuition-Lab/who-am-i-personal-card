@@ -13,7 +13,8 @@ and first-run owner profile.
   Recording permission onboarding;
 - network access while the pinned Runtime and locked dependencies are fetched.
 
-The first source install is large: it may fetch a managed Python plus
+When no Personal Model is present, the first source install is large: it may
+fetch a managed Python plus
 PaddlePaddle, OpenCV, OCR, and model-client dependencies. Two observed Apple
 Silicon dependency preparations took roughly four to seven minutes. Network
 conditions can make this longer, including stretches with no new terminal
@@ -44,9 +45,13 @@ Use this after entering the verified extracted directory:
 bash install.sh --interactive
 ```
 
-The installer fetches only the full commit in `runtime.lock`, verifies its Git
-tree, critical file digests and package metadata, then invokes the upstream
-source installer. Other MCP client configurations are not modified.
+The installer first checks the fixed local Runtime path. An existing
+owner-controlled standalone Personal Model is connected in place: only Who Am
+I and its private Node runtime are installed, and the Runtime, model data,
+permissions and MCP client configurations are not modified. If no Runtime is
+present, the installer fetches only the full commit in `runtime.lock`, verifies
+its Git tree, critical file digests and package metadata, then invokes the
+upstream source installer.
 
 Before invoking upstream installation it writes an owner-only management intent
 for the same immutable source. If permission onboarding or another late step
@@ -63,18 +68,29 @@ downloaded release directory is removed. The product additionally installs:
 - owner Profile and Card state under
   `~/Library/Application Support/Who Am I` after first use.
 
-Opening Who Am I first asks for the signed-in user's name and handle. The
-resulting stable random `local-*` model ID is persisted with that profile. The
-Card then directs the user to finish Persome onboarding and macOS permissions.
+When a ready standalone Personal Model already exists, opening Who Am I
+connects it automatically. A secure `~/.persome/who-am-i/profile.json` identity
+is migrated when present; otherwise the macOS account name becomes the initial
+Card identity. The generated stable random `local-*` model ID is persisted
+under Application Support and all six product modules use that partition. A
+fresh or incomplete Runtime keeps the existing profile and permission flow.
 One macOS account maps to one owner Runtime by default.
 
-Immediately after installation:
+Immediately after a fresh product-managed Runtime installation:
 
 ```bash
 MANAGEMENT_ROOT="${PERSOME_INSTALL_HOME:-$HOME/.persome}/product-management"
 bash "${MANAGEMENT_ROOT}/scripts/diagnose.sh"
 bash "${MANAGEMENT_ROOT}/scripts/verify.sh" --quick
 bash "${MANAGEMENT_ROOT}/scripts/verify-product.sh"
+```
+
+For a connected standalone Runtime, no product management bundle or Runtime
+receipt is added. Run its existing `persome doctor` and `persome status`
+commands, and verify the Card from the immutable product checkout:
+
+```bash
+bash scripts/verify-product.sh
 ```
 
 After provider setup and onboarding finish:
@@ -92,7 +108,7 @@ immutable Git tag:
 
 ```bash
 codex plugin marketplace add \
-  "Intuition-Lab/who-am-i-personal-card@v0.1.0-beta.1"
+  "Intuition-Lab/who-am-i-personal-card@v0.1.0-beta.2"
 codex plugin add personal-model-context@intuition-lab
 ```
 
@@ -125,15 +141,18 @@ bash "${PERSOME_INSTALL_HOME:-$HOME/.persome}/product-management/scripts/verify.
 open "$HOME/Applications/Who Am I.app"
 ```
 
-The final command opens the same first-run profile flow used by an interactive
-install. Running `persome onboard` alone does not create the Personal Card name,
-handle or stable product model ID.
+The final command opens the same first-run flow used by an interactive install.
+After Runtime onboarding, Who Am I creates the Personal Card name, handle and
+stable product model ID; an already-ready standalone Runtime is connected
+without running this path.
 
 ## Reinstall and update
 
 Re-running the installer uses the same immutable Runtime source and preserves
 the Runtime data root and existing owner secrets through the upstream
-transactional installer.
+transactional installer. A standalone existing Runtime remains standalone:
+re-running this product installer updates only the versioned Card and private
+Node runtime.
 
 Do not run `persome update` directly for an installation managed by this
 product. The standalone updater follows its configured source and can move

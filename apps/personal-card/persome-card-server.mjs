@@ -22,6 +22,7 @@ import { FixtureProvider } from "./src/providers/fixture-provider.mjs";
 import { LocalPersomeProvider } from "./src/providers/local-persome-provider.mjs";
 import { ProviderRegistry } from "./src/providers/provider-registry.mjs";
 import { OWNER_SCOPES } from "./src/auth/scope-policy.mjs";
+import { existingPersonalModelProfile } from "./src/setup/existing-personal-model-profile.mjs";
 import { OwnerProfileStore } from "./src/setup/owner-profile-store.mjs";
 
 const CARD_ROOT = dirname(fileURLToPath(import.meta.url));
@@ -66,6 +67,7 @@ const localPersomeProvider = new LocalPersomeProvider({
 });
 const ownerProfileStore = new OwnerProfileStore({ dataDir: CARD_DATA_DIR });
 let ownerProfile = await ownerProfileStore.load();
+let ownerProfileProvisionPromise = null;
 const providerRegistry = new ProviderRegistry(
   DEV_MODE
     ? {
@@ -130,7 +132,10 @@ function resolvePersomeCli() {
   const managedCli = resolve(PERSOME_ROOT, "venv/bin/persome");
   if (TEST_MODE && PERSOME_CLI_OVERRIDE) return PERSOME_CLI_OVERRIDE;
   if (DEV_MODE) return PERSOME_CLI_OVERRIDE || findExecutable("persome");
-  return managedRuntimeIdentityReady(managedCli) ? managedCli : "";
+  return managedRuntimeIdentityReady(managedCli)
+    || existingRuntimeIdentityReady(managedCli)
+    ? managedCli
+    : "";
 }
 
 function secureOwnedFile(path) {
@@ -140,6 +145,33 @@ function secureOwnedFile(path) {
       && !stats.isSymbolicLink()
       && (typeof process.getuid !== "function" || stats.uid === process.getuid())
       && (stats.mode & 0o022) === 0;
+  } catch {
+    return false;
+  }
+}
+
+function secureOwnedDirectory(path) {
+  try {
+    const stats = lstatSync(path);
+    return stats.isDirectory()
+      && !stats.isSymbolicLink()
+      && (typeof process.getuid !== "function" || stats.uid === process.getuid())
+      && (stats.mode & 0o022) === 0;
+  } catch {
+    return false;
+  }
+}
+
+function existingRuntimeIdentityReady(cliPath) {
+  const venvRoot = resolve(PERSOME_ROOT, "venv");
+  const binRoot = resolve(venvRoot, "bin");
+  try {
+    const cliStats = lstatSync(cliPath);
+    return secureOwnedDirectory(PERSOME_ROOT)
+      && secureOwnedDirectory(venvRoot)
+      && secureOwnedDirectory(binRoot)
+      && secureOwnedFile(cliPath)
+      && (cliStats.mode & 0o111) !== 0;
   } catch {
     return false;
   }
@@ -181,6 +213,30 @@ function registerOwnerProfile(profile) {
 }
 
 if (ownerProfile) registerOwnerProfile(ownerProfile);
+
+async function ensureOwnerProfileForExistingModel({ allowAccountFallback }) {
+  if (ownerProfile) return ownerProfile;
+  if (!ownerProfileProvisionPromise) {
+    ownerProfileProvisionPromise = (async () => {
+      const detected = await existingPersonalModelProfile({
+        persomeRoot: PERSOME_ROOT,
+      });
+      if (
+        detected.origin === "macos-account"
+        && allowAccountFallback !== true
+      ) {
+        return null;
+      }
+      const saved = await ownerProfileStore.save(detected);
+      ownerProfile = saved;
+      registerOwnerProfile(saved);
+      return saved;
+    })().finally(() => {
+      ownerProfileProvisionPromise = null;
+    });
+  }
+  return ownerProfileProvisionPromise;
+}
 
 function runLocalCommand(command, args, timeoutMs = 18000) {
   return new Promise((resolveCommand) => {
@@ -1454,10 +1510,18 @@ function setupRequiredError(code, message) {
 async function personalModelSetupStatus() {
   const cli = resolvePersomeCli();
   const installed = !!cli;
-  const profile = ownerProfileStore.publicView();
+  const managed = managedRuntimeIdentityReady(
+    resolve(PERSOME_ROOT, "venv/bin/persome"),
+  );
+  const existing = !managed && existingRuntimeIdentityReady(
+    resolve(PERSOME_ROOT, "venv/bin/persome"),
+  );
   let initialized = false;
   let buildStatus = "unavailable";
-  if (installed) {
+  if (DEV_MODE) {
+    initialized = true;
+    buildStatus = "development";
+  } else if (installed) {
     let client;
     try {
       client = await connectPersome();
@@ -1476,6 +1540,12 @@ async function personalModelSetupStatus() {
       client?.close();
     }
   }
+  if (!DEV_MODE && initialized && !ownerProfile) {
+    await ensureOwnerProfileForExistingModel({
+      allowAccountFallback: existing,
+    });
+  }
+  const profile = ownerProfileStore.publicView();
   let state = "ready";
   if (!profile) state = "profile_required";
   else if (!installed) state = "not_installed";
@@ -1491,6 +1561,13 @@ async function personalModelSetupStatus() {
       initialized,
       buildStatus,
       version: "0.3.2",
+      connection: managed
+        ? "product-managed"
+        : existing
+          ? "existing"
+          : installed
+            ? "test"
+            : "unavailable",
     }),
   });
 }

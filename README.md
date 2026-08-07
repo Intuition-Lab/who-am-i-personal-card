@@ -3,9 +3,11 @@
 Installable macOS product built on the
 [Persome Personal Model Runtime](https://github.com/Intuition-Lab/personal-model).
 
-Each downloader creates a stable local Personal Card identity, then connects
-the same UI to the Personal Model owned by that macOS account. Card, Rewind,
-Identity, Connector, Report, and Evidence data stay bound to that local model.
+Each downloader connects the same UI to the Personal Model owned by that macOS
+account. A secure existing standalone Runtime is reused automatically; a new
+Runtime and stable local Personal Card identity are created only when needed.
+Card, Rewind, Identity, Connector, Report, and Evidence data stay bound to that
+local model.
 Cecilia and Lin exist only as explicit development fixtures and are never
 registered by a production launch.
 
@@ -29,6 +31,9 @@ GitHub Release until a release owner records a reviewed `GO` decision.
   the same Mac should use separate macOS accounts; changing only a display name
   does not create a separate memory store.
 - The Runtime source is fixed to the full commit recorded in `runtime.lock`.
+- An existing owner-controlled `~/.persome/venv/bin/persome` is connected in
+  place. The product does not replace it, claim it as product-managed, repeat
+  onboarding, or modify its data.
 - Node.js is pinned in `product.lock`; users do not need a preinstalled Node.
 - The Runtime installer does not modify Claude, Codex, Cursor, or other MCP
   client configurations. The Codex plugin is a separate, explicit install.
@@ -56,9 +61,12 @@ the repository CI and isolated Apple Silicon installation test:
 
 The application is currently unsigned and unnotarized. macOS may ask the user
 to confirm opening it, and Accessibility and Screen Recording permissions must
-be approved by the signed-in user. On first launch, the user creates their own
-local Card profile and connects the owner-local Personal Model; production
-never registers the Cecilia or Lin development fixtures.
+be approved by the signed-in user. On first launch, an existing Personal Model
+connects automatically. A prior Who Am I profile is migrated when available;
+otherwise the macOS account name becomes the initial local Card identity. A
+Mac without an initialized Personal Model keeps the existing profile and
+permission flow. Production never registers the Cecilia or Lin development
+fixtures.
 
 ## Install an immutable release
 
@@ -66,7 +74,7 @@ never registers the Cecilia or Lin development fixtures.
 (
   set -euo pipefail
   REPOSITORY="Intuition-Lab/who-am-i-personal-card"
-  VERSION="0.1.0-beta.1"
+  VERSION="0.1.0-beta.2"
   REPOSITORY_NAME="${REPOSITORY##*/}"
   RELEASE_BASE="https://github.com/${REPOSITORY}/releases/download/v${VERSION}"
   DOWNLOAD_DIRECTORY="$(
@@ -115,14 +123,15 @@ Automation may install the pinned Runtime without opening permission dialogs:
 bash install.sh --non-interactive
 ```
 
-That mode deliberately leaves onboarding pending.
+For a fresh Runtime, that mode deliberately leaves onboarding pending. An
+already-ready standalone Personal Model stays ready.
 
-The interactive install installs the pinned Runtime and Card, then opens Who Am
-I. The first screen asks for the downloader's own name and card handle. Its
-“安装 / 完成本机授权” button opens the pinned Persome onboarding command; macOS
-Accessibility and Screen Recording approval still has to be completed by the
-signed-in user. A new model may initially be sparse or “forming”; it never
-falls back to another person's demo memory.
+The interactive install first checks for an existing owner-controlled Personal
+Model. When one is ready, it installs only the Card, opens Who Am I, imports an
+existing Card identity when available, and connects without repeating
+permissions or onboarding. Otherwise it installs the pinned Runtime and opens
+the existing profile/permission flow. A new model may initially be sparse or
+“forming”; it never falls back to another person's demo memory.
 
 If the command is run without an interactive terminal, finish Runtime
 onboarding and then open Who Am I:
@@ -132,9 +141,9 @@ onboarding and then open Who Am I:
 open "$HOME/Applications/Who Am I.app"
 ```
 
-The installer leaves a small owner-only management bundle under the Runtime
-data root. Its commands keep working after the downloaded release directory is
-deleted:
+For a Runtime installed by this product, the installer leaves a small
+owner-only management bundle under the Runtime data root. Its commands keep
+working after the downloaded release directory is deleted:
 
 ```bash
 MANAGEMENT_ROOT="${PERSOME_INSTALL_HOME:-$HOME/.persome}/product-management"
@@ -142,6 +151,12 @@ bash "${MANAGEMENT_ROOT}/scripts/diagnose.sh"
 bash "${MANAGEMENT_ROOT}/scripts/verify.sh" --quick
 bash "${MANAGEMENT_ROOT}/scripts/verify-product.sh"
 ```
+
+When Who Am I connects an existing standalone Personal Model, it deliberately
+does not add product Runtime receipts or management commands. Use that
+Runtime's existing `persome doctor` / `persome status` commands, and use
+`bash scripts/verify-product.sh` from the immutable Who Am I checkout to verify
+the Card installation.
 
 Run full verification only after the LLM provider is configured and onboarding
 is complete:
@@ -158,7 +173,7 @@ install the plugin:
 
 ```bash
 codex plugin marketplace add \
-  "Intuition-Lab/who-am-i-personal-card@v0.1.0-beta.1"
+  "Intuition-Lab/who-am-i-personal-card@v0.1.0-beta.2"
 codex plugin add personal-model-context@intuition-lab
 ```
 

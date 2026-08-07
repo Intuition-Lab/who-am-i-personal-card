@@ -13,7 +13,7 @@ direct evidence and the machine-readable decision below is complete. The
 manual **Pilot invitation gate** workflow must then pass against the live
 release. That result authorizes exactly five pilot invitations.
 
-<!-- pilot-decision:v1 status=HOLD wave=5 version=0.1.0-beta.1 tag=v0.1.0-beta.1 commit=TBD owner=TBD approved-at=TBD -->
+<!-- pilot-decision:v1 status=HOLD wave=5 version=0.1.0-beta.2 tag=v0.1.0-beta.2 commit=TBD owner=TBD approved-at=TBD -->
 
 ## Roles and records
 

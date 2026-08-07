@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 const projectRoot = new URL("../../", import.meta.url);
@@ -22,6 +25,7 @@ async function waitForServer(baseUrl, child) {
 }
 
 test("one viewer session switches Cecilia/Lin without six-module data crossover", async (t) => {
+  const cardDataDir = await mkdtemp(join(tmpdir(), "whoami-runtime-switch-"));
   const port = 18000 + (process.pid % 10000);
   const baseUrl = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, ["persome-card-server.mjs"], {
@@ -29,6 +33,7 @@ test("one viewer session switches Cecilia/Lin without six-module data crossover"
     env: {
       ...process.env,
       WHOAMI_CARD_PORT: String(port),
+      WHOAMI_CARD_DATA_DIR: cardDataDir,
       WHOAMI_PROVIDER_MODE: "fixture",
       WHOAMI_DEV_MODE: "1",
     },

@@ -663,6 +663,36 @@ test_dual_receipt_round_trip() {
     grep -Fq "CLI OK: ${RUNTIME_PROJECT_NAME} ${RUNTIME_PROJECT_VERSION}"
 }
 
+test_owner_controlled_standalone_runtime_is_connectable_without_receipts() {
+  local install_home="${TEST_HOME}/standalone-runtime"
+  runtime_lock_load "${RUNTIME_LOCK}"
+  PERSOME_INSTALL_HOME="${install_home}"
+  runtime_install_home_resolve
+  mkdir -p "${install_home}"
+  write_fake_runtime_venv "${install_home}"
+
+  runtime_existing_install_verify
+  [[ ! -e "${install_home}/product-runtime.lock" ]]
+  [[ ! -e "${install_home}/venv/.product-runtime.lock" ]]
+  assert_rejected runtime_managed_install_verify
+}
+
+test_standalone_runtime_symlink_cli_is_rejected() {
+  local install_home="${TEST_HOME}/standalone-symlink"
+  local external_cli="${TEST_CASES}/standalone-external-cli"
+  runtime_lock_load "${RUNTIME_LOCK}"
+  PERSOME_INSTALL_HOME="${install_home}"
+  runtime_install_home_resolve
+  mkdir -p "${install_home}"
+  write_fake_runtime_venv "${install_home}"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "${external_cli}"
+  chmod 0700 "${external_cli}"
+  rm -f -- "${install_home}/venv/bin/${RUNTIME_CLI}"
+  ln -s "${external_cli}" "${install_home}/venv/bin/${RUNTIME_CLI}"
+
+  assert_rejected runtime_existing_install_verify
+}
+
 test_non_interactive_update_is_rejected_before_mutation() {
   local install_home="${TEST_HOME}/non-interactive-update"
   local output="${TEST_CASES}/non-interactive-update.out"
@@ -2211,6 +2241,10 @@ run_case "symlink Runtime receipt is never overwritten" \
   test_symlink_receipt_rejected
 run_case "external and venv Runtime receipts verify together" \
   test_dual_receipt_round_trip
+run_case "owner-controlled standalone Runtime connects without product receipts" \
+  test_owner_controlled_standalone_runtime_is_connectable_without_receipts
+run_case "standalone Runtime never follows a symlinked CLI" \
+  test_standalone_runtime_symlink_cli_is_rejected
 run_case "non-interactive update is rejected before mutation" \
   test_non_interactive_update_is_rejected_before_mutation
 run_case "same-version replacement venv without receipt is rejected" \

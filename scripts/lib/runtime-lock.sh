@@ -482,6 +482,14 @@ runtime_managed_venv_artifacts_verify() {
   runtime_path_reject_shared_write "${runtime_cli}" || return 1
 }
 
+runtime_existing_install_verify() {
+  # A standalone Persome installation has no product receipts. It can still be
+  # connected without being claimed or updated by this product when every
+  # executable path is owner-controlled and resolves inside the expected
+  # ~/.persome venv.
+  runtime_managed_venv_artifacts_verify
+}
+
 runtime_managed_install_verify() {
   runtime_receipt_verify \
     "${RUNTIME_INSTALL_HOME}/product-runtime.lock" || return 1

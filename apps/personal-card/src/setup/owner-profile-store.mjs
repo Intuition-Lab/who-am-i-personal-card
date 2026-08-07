@@ -4,6 +4,11 @@ import { resolve } from "node:path";
 
 const HANDLE_PATTERN = /^[A-Za-z0-9_.-]{2,32}$/;
 const MODEL_ID_PATTERN = /^local-[a-f0-9]{20}$/;
+const PROFILE_ORIGINS = new Set([
+  "manual",
+  "existing-personal-model",
+  "macos-account",
+]);
 
 function cleanText(value, maxLength) {
   return String(value ?? "").trim().replace(/\s+/g, " ").slice(0, maxLength);
@@ -36,6 +41,7 @@ function assertProfile(profile) {
     || !MODEL_ID_PATTERN.test(profile.modelId)
     || !cleanText(profile.displayName, 64)
     || !HANDLE_PATTERN.test(profile.handle)
+    || (profile.origin != null && !PROFILE_ORIGINS.has(profile.origin))
     || !Array.isArray(profile.glyph)
     || profile.glyph.length !== 25
     || profile.glyph.some((value) => typeof value !== "boolean")
@@ -44,6 +50,7 @@ function assertProfile(profile) {
   }
   return Object.freeze({
     ...profile,
+    origin: profile.origin || "manual",
     glyph: Object.freeze([...profile.glyph]),
   });
 }
@@ -110,6 +117,8 @@ export class OwnerProfileStore {
     const profile = assertProfile({
       version: 1,
       modelId,
+      origin: this.current?.origin
+        || (PROFILE_ORIGINS.has(input?.origin) ? input.origin : "manual"),
       displayName,
       handle,
       memberNumber: this.current?.memberNumber
@@ -156,6 +165,7 @@ export class OwnerProfileStore {
       sinceYear: profile.sinceYear,
       tagline: profile.tagline,
       description: profile.description,
+      origin: profile.origin,
     });
   }
 }

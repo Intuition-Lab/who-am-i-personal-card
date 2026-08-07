@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { mkdir, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -85,11 +86,13 @@ async function clickVisible(locator) {
 }
 
 await mkdir(outputDir, { recursive: true });
+const cardDataDir = await mkdtemp(path.join(tmpdir(), "whoami-browser-switch-"));
 const server = spawn(process.execPath, ["persome-card-server.mjs"], {
   cwd: projectRoot,
   env: {
     ...process.env,
     WHOAMI_CARD_PORT: String(port),
+    WHOAMI_CARD_DATA_DIR: cardDataDir,
     WHOAMI_PROVIDER_MODE: "fixture",
     WHOAMI_DEV_MODE: "1",
   },

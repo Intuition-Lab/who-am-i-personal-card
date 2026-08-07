@@ -133,10 +133,10 @@ Interaction mode:    ${INTERACTION_MODE}
 
 The installer will:
   1. verify this is a supported Mac;
-  2. fetch exactly the pinned Runtime commit into a temporary directory;
-  3. verify the commit, tree, critical file digests, and package metadata;
-  4. run the Runtime's source installer without modifying other MCP clients;
-  5. record the pinned source identity and verify the installed CLI/package.
+  2. securely detect an existing owner-local Personal Model, if present;
+  3. otherwise fetch and verify exactly the pinned Runtime commit;
+  4. install or update only the product-managed Runtime path;
+  5. never claim, replace, or re-onboard a standalone existing Runtime;
   6. install the Personal Card and its pinned private Node runtime.
 EOF
   if [[ "${INTERACTION_MODE}" == "interactive" ]]; then
@@ -350,6 +350,7 @@ install_state_preflight() {
   local active_runtime_lock="${management_root}/runtime.lock"
 
   MANAGED_EXISTING=0
+  EXTERNAL_EXISTING=0
   REMOVE_UNINSTALL_TOMBSTONE=0
   ACTIVE_EXISTING_LOCK=""
 
@@ -376,13 +377,20 @@ install_state_preflight() {
       # The installed Runtime belongs to an earlier qualified product lock.
       # Keep that stable bundle unchanged until the target venv is complete.
       ACTIVE_EXISTING_LOCK="${active_runtime_lock}"
+    elif runtime_existing_install_verify >/dev/null 2>&1; then
+      # Standalone Persome remains owned by its existing installation. The
+      # product installs only the Card and connects through the fixed local
+      # venv path; it never writes Runtime receipts for code it did not install.
+      EXTERNAL_EXISTING=1
     else
       printf '%s\n' \
         'An existing Runtime venv is not a verified product-managed install.' \
         'Refusing to execute or replace unverified Runtime code.' >&2
       return 1
     fi
-    MANAGED_EXISTING=1
+    if [[ "${EXTERNAL_EXISTING}" -eq 0 ]]; then
+      MANAGED_EXISTING=1
+    fi
   elif [[ -e "${external_receipt}" || -L "${external_receipt}" \
     || -e "${internal_receipt}" || -L "${internal_receipt}" ]]; then
     printf '%s\n' \
@@ -626,8 +634,12 @@ if [[ "${MODE}" == "check" ]]; then
   exit 0
 fi
 
-/bin/mkdir -p "${RUNTIME_INSTALL_HOME}"
-/bin/chmod 0700 "${RUNTIME_INSTALL_HOME}"
+if [[ -e "${RUNTIME_INSTALL_HOME}" ]]; then
+  runtime_secure_owned_directory_verify "${RUNTIME_INSTALL_HOME}"
+else
+  /bin/mkdir -p "${RUNTIME_INSTALL_HOME}"
+  /bin/chmod 0700 "${RUNTIME_INSTALL_HOME}"
+fi
 runtime_install_home_resolve
 runtime_operation_lock_acquire
 
@@ -663,6 +675,27 @@ trap 'exit 143' TERM
 trap 'exit 129' HUP
 
 install_state_preflight
+if [[ "${EXTERNAL_EXISTING}" -eq 1 ]]; then
+  temporary_root="$(runtime_temporary_root_create "personal-model-product")"
+  install_personal_card
+  /bin/bash "${PRODUCT_ROOT}/scripts/verify-product.sh"
+  cat <<EOF
+
+Existing Personal Model detected and preserved.
+Who Am I connected to:
+
+  ${RUNTIME_INSTALL_HOME}
+
+No Runtime files, model data, permissions, or MCP client settings were changed.
+Who Am I is installed in:
+
+  ${HOME}/Applications/Who Am I.app
+EOF
+  if [[ "${INTERACTION_MODE}" == "interactive" ]]; then
+    /usr/bin/open "${HOME}/Applications/Who Am I.app" || true
+  fi
+  exit 0
+fi
 if [[ "${MANAGED_EXISTING}" -eq 1 \
   && "${INTERACTION_MODE}" != "interactive" ]]; then
   printf '%s\n' \

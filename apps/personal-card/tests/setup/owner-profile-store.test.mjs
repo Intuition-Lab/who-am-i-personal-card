@@ -26,6 +26,7 @@ test("owner profile creates one stable local identity and survives restart", asy
   assert.match(created.modelId, /^local-[a-f0-9]{20}$/);
   assert.equal(created.handle, "mira");
   assert.equal(created.displayName, "Mira");
+  assert.equal(created.origin, "manual");
   assert.equal(created.glyph.length, 25);
   assert.equal(store.publicView().handle, "@mira");
 
@@ -45,6 +46,24 @@ test("owner profile creates one stable local identity and survives restart", asy
     JSON.parse(await readFile(restarted.profilePath, "utf8")).modelId,
     created.modelId,
   );
+});
+
+test("owner profile records an existing-model origin without changing its stable ID", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "whoami-owner-imported-"));
+  const store = new OwnerProfileStore({ dataDir });
+  const created = await store.save({
+    displayName: "Existing Owner",
+    handle: "existing-owner",
+    origin: "existing-personal-model",
+  });
+  assert.equal(created.origin, "existing-personal-model");
+  assert.equal(store.publicView().origin, "existing-personal-model");
+
+  const updated = await store.save({
+    displayName: "Existing Owner Updated",
+  });
+  assert.equal(updated.modelId, created.modelId);
+  assert.equal(updated.origin, "existing-personal-model");
 });
 
 test("owner profile rejects unsafe or missing public identity fields", async () => {
