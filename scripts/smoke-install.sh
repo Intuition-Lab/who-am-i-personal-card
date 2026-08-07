@@ -149,19 +149,18 @@ else
     )"
   fi
 
-  # Updating an existing Runtime must not silently trigger permission checks
-  # from automation. Reject before checkout or Runtime mutation.
+  # Reinstalling the exact same pinned Runtime may refresh the native App and
+  # management bundle without rerunning Runtime setup or permission checks.
+  # The foundation suite separately proves that a different pinned Runtime is
+  # still rejected in non-interactive mode before Runtime mutation.
   non_interactive_update_output="${smoke_root}/non-interactive-update.out"
-  if bash "${PRODUCT_ROOT}/install.sh" --non-interactive \
-    > "${non_interactive_update_output}" 2>&1; then
-    printf 'An existing Runtime unexpectedly allowed a non-interactive update.\n' \
-      >&2
-    exit 1
-  fi
+  bash "${PRODUCT_ROOT}/install.sh" --non-interactive \
+    > "${non_interactive_update_output}" 2>&1
   /usr/bin/grep -Fq \
-    "Updating an existing Runtime requires an interactive logged-in terminal." \
+    "already matches this product's pinned Runtime" \
     "${non_interactive_update_output}"
   bash "${PRODUCT_ROOT}/scripts/verify.sh" --quick
+  bash "${PRODUCT_ROOT}/scripts/verify-product.sh"
   test "$(
     /bin/cat "${PERSOME_INSTALL_HOME}/product-preservation-sentinel"
   )" = "preserve-me"
