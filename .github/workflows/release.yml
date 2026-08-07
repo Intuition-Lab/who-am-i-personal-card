@@ -57,7 +57,12 @@ jobs:
       - name: Validate repository and Runtime lock
         shell: bash
         run: |
-          bash -n ./*.sh scripts/*.sh scripts/lib/*.sh tests/*.sh
+          bash -n \
+            ./*.sh \
+            scripts/*.sh \
+            scripts/lib/*.sh \
+            tests/*.sh \
+            apps/personal-card/macos/*.sh
           bash install.sh --print-plan
           bash update.sh --print-plan
           bash uninstall-runtime.sh --print-plan

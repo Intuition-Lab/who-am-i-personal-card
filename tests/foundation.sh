@@ -696,9 +696,22 @@ test_standalone_runtime_symlink_cli_is_rejected() {
 test_non_interactive_update_is_rejected_before_mutation() {
   local install_home="${TEST_HOME}/non-interactive-update"
   local output="${TEST_CASES}/non-interactive-update.out"
+  local previous_lock="${install_home}/product-management/runtime.lock"
+  local previous_commit="0000000000000000000000000000000000000000"
   local before after status
 
   prepare_fake_runtime_install "${install_home}"
+  mkdir -p "${install_home}/product-management"
+  chmod 0700 "${install_home}/product-management"
+  replace_lock_value "${previous_lock}" "RUNTIME_COMMIT" "${previous_commit}"
+  chmod 0600 "${previous_lock}"
+  runtime_lock_load "${previous_lock}"
+  rm -f -- \
+    "${install_home}/venv/.product-runtime.lock" \
+    "${install_home}/product-runtime.lock"
+  runtime_receipt_write "${install_home}/venv/.product-runtime.lock"
+  runtime_receipt_write "${install_home}/product-runtime.lock"
+  runtime_lock_load "${RUNTIME_LOCK}"
   mkdir -p "${install_home}/product-cache/uv"
   chmod 0700 "${install_home}/product-cache" \
     "${install_home}/product-cache/uv"
@@ -722,8 +735,10 @@ test_non_interactive_update_is_rejected_before_mutation() {
   [[ "${after}" == "${before}" ]]
   [[ "$(command cat "${install_home}/personal-data")" == "preserve" ]]
   [[ ! -e "${install_home}/product-runtime.installing" ]]
+  runtime_lock_load "${previous_lock}"
   runtime_receipt_verify "${install_home}/product-runtime.lock"
   runtime_receipt_verify "${install_home}/venv/.product-runtime.lock"
+  runtime_lock_load "${RUNTIME_LOCK}"
 }
 
 test_replaced_venv_without_receipt_rejected() {
@@ -2245,7 +2260,7 @@ run_case "owner-controlled standalone Runtime connects without product receipts"
   test_owner_controlled_standalone_runtime_is_connectable_without_receipts
 run_case "standalone Runtime never follows a symlinked CLI" \
   test_standalone_runtime_symlink_cli_is_rejected
-run_case "non-interactive update is rejected before mutation" \
+run_case "non-interactive cross-Runtime update is rejected before mutation" \
   test_non_interactive_update_is_rejected_before_mutation
 run_case "same-version replacement venv without receipt is rejected" \
   test_replaced_venv_without_receipt_rejected

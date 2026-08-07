@@ -1,7 +1,7 @@
 # Personal Card V5
 
-同一套 Personal Card UI，可以在一个浏览器会话中安全切换不同的
-Personal Model。当前包含：
+同一套 Personal Card UI，可以在一个独立 macOS App 会话中安全连接和
+切换不同的 Personal Model。当前包含：
 
 - 本机 `LocalPersomeProvider`；
 - Cecilia 与 Lin 两套可复现 fixture；
@@ -23,9 +23,10 @@ bash install.sh --interactive
 
 安装器会安装 `runtime.lock` 固定的 Personal Model commit（其包元数据为
 0.3.2）、产品私有 Node.js、依赖和
-`~/Applications/Who Am I.app`。用户完成 macOS 权限后，首次打开只需输入
-自己的姓名和 handle；服务会生成稳定随机的本机 `modelId`，并从该 macOS
-账户自己的 Persome 读取内容。
+`~/Applications/Who Am I.app`。这是一个 AppKit + WKWebView 独立窗口，
+不会打开默认浏览器。用户完成 macOS 权限后，首次打开只需输入自己的姓名
+和 handle；服务会生成稳定随机的本机 `modelId`，并从该 macOS 账户自己的
+Persome 读取内容。
 
 生产模式不注册 Cecilia 或 Lin，也不会在 Runtime 不可用时回退他人的
 fixture。未安装、未授权、模型形成中和不可用都会显示真实引导状态。
@@ -81,20 +82,21 @@ npm run test:production-browser
 npm run build
 ```
 
-它会把源模板与逻辑同步进 `WhoAmI v5.dc.html` 和浏览器实际加载的
-`WhoAmI v5 · Persome Live.html`。
+它会把源模板与逻辑同步进 `WhoAmI v5.dc.html` 和 App 内部实际加载的
+`WhoAmI v5 · Persome Live.html`。这个 HTML 是应用内部实现资产，不是
+用户需要打开的交付物。
 
 ## 安全边界
 
 - 服务只监听 `127.0.0.1`。
-- 每个浏览器得到独立的 `HttpOnly; SameSite=Strict` 会话 Cookie。
+- 每个 App/WebView 会话得到独立的 `HttpOnly; SameSite=Strict` Cookie。
 - 模型切换只在完整 Snapshot 校验和权限投影成功后原子提交。
 - 后续 API 从会话读取 `activeModelId`；请求体或 Query 不能覆盖模型。
-- 未授权字段不会下发到浏览器，Public Projection 只包含 Card 与 Identity。
+- 未授权字段不会下发到 App，Public Projection 只包含 Card 与 Identity。
 - Evidence reference 必须带当前 `modelId`。
 - 模型切换会撤销旧 Connector Session、Coast allowlist，并关闭旧 Report、
   Rewind、Evidence、Share 与 Connector Picker。
-- Provider、本机路径和远程响应中的敏感错误不会透传给浏览器。
+- Provider、本机路径和远程响应中的敏感错误不会透传给 App。
 
 数据契约见 `src/contracts/`，Provider 见 `src/providers/`，权限与会话见
 `src/auth/`，Connector/Report/Evidence 隔离见 `src/connectors/` 与

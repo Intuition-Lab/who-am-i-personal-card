@@ -1,7 +1,7 @@
 # Installation and lifecycle
 
 This document covers the complete Who Am I beta installation: the pinned
-Persome Runtime, private Node runtime, Personal Card server, local app launcher
+Persome Runtime, private Node runtime, Personal Card server, native macOS app
 and first-run owner profile.
 
 ## Requirements
@@ -64,9 +64,15 @@ downloaded release directory is removed. The product additionally installs:
 
 - versioned Card code and private Node under
   `~/.persome/product-app/<product-version>`;
-- `~/Applications/Who Am I.app`;
+- a universal AppKit + WKWebView application at
+  `~/Applications/Who Am I.app`;
 - owner Profile and Card state under
   `~/Library/Application Support/Who Am I` after first use.
+
+Opening `Who Am I.app` creates an independent macOS window and starts the
+owner-local Card service for that window. It does not open the Card URL in the
+default browser. The existing HTML UI remains an internal implementation asset
+so the approved visual baseline and interactions do not change.
 
 When a ready standalone Personal Model already exists, opening Who Am I
 connects it automatically. A secure `~/.persome/who-am-i/profile.json` identity
@@ -108,7 +114,7 @@ immutable Git tag:
 
 ```bash
 codex plugin marketplace add \
-  "Intuition-Lab/who-am-i-personal-card@v0.1.0-beta.3"
+  "Intuition-Lab/who-am-i-personal-card@v0.1.0-beta.4"
 codex plugin add personal-model-context@intuition-lab
 ```
 

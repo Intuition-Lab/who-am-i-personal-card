@@ -5,8 +5,10 @@ remain release or rollout gates where stated.
 
 ## Distribution
 
-- There is no signed or notarized `.app`, `.dmg`, or `.pkg`. The current
-  distribution is a GitHub source archive plus a terminal installer.
+- The terminal installer now builds and ad-hoc signs a universal native
+  `Who Am I.app`. There is still no Developer ID signature, notarization,
+  `.dmg`, or `.pkg`; the current distribution remains a GitHub source archive
+  plus a terminal installer.
 - The new GitHub organization, repository name, visibility, tester access and
   exact download URL are not decided.
 - The product license and redistribution policy are not decided.
@@ -55,6 +57,9 @@ remain release or rollout gates where stated.
 - The product name, existing V5 UI and owner-local first-run flow are
   implemented. The supported golden path is install → create local Card
   identity → complete Persome onboarding → reopen the same owner model.
+- The installed app now owns an AppKit window with an embedded WKWebView and
+  does not open the Card in the default browser. The approved V5 HTML remains
+  inside the private product directory as an internal rendering asset.
 - One macOS account maps to one owner Runtime. Changing the Card display name
   does not create a second isolated memory store; use separate macOS accounts
   or explicitly separate `PERSOME_ROOT` values for different people.

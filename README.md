@@ -11,10 +11,10 @@ local model.
 Cecilia and Lin exist only as explicit development fixtures and are never
 registered by a production launch.
 
-The source candidate includes the Card UI, a pinned private Node.js runtime, the
-reproducible Persome Runtime installer, verification and support tooling, and
-an optional Codex plugin that recalls relevant Personal Model context on every
-turn.
+The source candidate includes a native macOS app window, the unchanged Card
+UI, a pinned private Node.js runtime, the reproducible Persome Runtime
+installer, verification and support tooling, and an optional Codex plugin that
+recalls relevant Personal Model context on every turn.
 
 `RELEASE_STATUS` is currently `HOLD`. Tagging this candidate cannot publish a
 GitHub Release until a release owner records a reviewed `GO` decision.
@@ -39,6 +39,8 @@ model database is never bundled into another person's download.
 - Product profile and model-partitioned Card state stay owner-locally under
   `~/Library/Application Support/Who Am I`.
 - The installed application is `~/Applications/Who Am I.app`.
+- Opening the application creates its own macOS window. It does not launch the
+  Card in Safari, Chrome, or another default browser.
 - One macOS account maps to one owner Runtime by default. Different people on
   the same Mac should use separate macOS accounts; changing only a display name
   does not create a separate memory store.
@@ -71,14 +73,15 @@ the repository CI and isolated Apple Silicon installation test:
 )
 ```
 
-The application is currently unsigned and unnotarized. macOS may ask the user
-to confirm opening it, and Accessibility and Screen Recording permissions must
-be approved by the signed-in user. On first launch, an existing Personal Model
-connects automatically. A prior Who Am I profile is migrated when available;
-otherwise the macOS account name becomes the initial local Card identity. A
-Mac without an initialized Personal Model keeps the existing profile and
-permission flow. Production never registers the Cecilia or Lin development
-fixtures.
+The application currently receives a local ad-hoc signature during
+installation; it is not Developer ID signed or notarized. macOS may ask the
+user to confirm opening it, and Accessibility and Screen Recording permissions
+must be approved by the signed-in user. On first launch, an existing Personal
+Model connects automatically. A prior Who Am I profile is migrated when
+available; otherwise the macOS account name becomes the initial local Card
+identity. A Mac without an initialized Personal Model keeps the existing
+profile and permission flow. Production never registers the Cecilia or Lin
+development fixtures.
 
 ## Install an immutable release after `RELEASE_STATUS=GO`
 
@@ -86,7 +89,7 @@ fixtures.
 (
   set -euo pipefail
   REPOSITORY="Intuition-Lab/who-am-i-personal-card"
-  VERSION="0.1.0-beta.3"
+  VERSION="0.1.0-beta.4"
   REPOSITORY_NAME="${REPOSITORY##*/}"
   RELEASE_BASE="https://github.com/${REPOSITORY}/releases/download/v${VERSION}"
   DOWNLOAD_DIRECTORY="$(
@@ -185,7 +188,7 @@ install the plugin:
 
 ```bash
 codex plugin marketplace add \
-  "Intuition-Lab/who-am-i-personal-card@v0.1.0-beta.3"
+  "Intuition-Lab/who-am-i-personal-card@v0.1.0-beta.4"
 codex plugin add personal-model-context@intuition-lab
 ```
 

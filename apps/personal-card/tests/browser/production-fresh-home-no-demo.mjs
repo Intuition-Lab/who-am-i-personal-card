@@ -90,6 +90,14 @@ const server = spawn(process.execPath, ["persome-card-server.mjs"], {
 let browser;
 try {
   await waitForServer(server);
+  const healthResponse = await fetch(`${baseUrl}/api/app/health`, {
+    signal: AbortSignal.timeout(1000),
+  });
+  const health = await healthResponse.json();
+  invariant(healthResponse.status === 200, "Native app health endpoint failed.");
+  invariant(health.productVersion === "development", "Health version was incorrect.");
+  invariant(health.devMode === false, "Production health enabled dev mode.");
+  assertNoDemo("native app health", health);
   browser = await chromium.launch({ executablePath: chromePath, headless: true });
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1000 },

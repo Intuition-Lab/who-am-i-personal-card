@@ -20,7 +20,7 @@ product_version="$(tr -d '[:space:]' < "${PRODUCT_ROOT}/VERSION")"
 card_root="${RUNTIME_INSTALL_HOME}/product-app/${product_version}"
 node_path="${card_root}/runtime/node/bin/node"
 app_bundle="${HOME}/Applications/Who Am I.app"
-app_executable="${app_bundle}/Contents/MacOS/Who Am I"
+app_executable="${app_bundle}/Contents/MacOS/WhoAmI"
 app_plist="${app_bundle}/Contents/Info.plist"
 
 for required_directory in \
@@ -66,10 +66,25 @@ if [[ -e "${card_root}/fixtures" || -e "${card_root}/tests" ]]; then
   printf 'Development fixtures or tests were installed into the product app.\n' >&2
   exit 1
 fi
-if ! /usr/bin/grep -Fq \
-  '<string>ai.intuition.whoami</string>' "${app_plist}" \
-  || ! /usr/bin/grep -Fq "${card_root}" "${app_executable}"; then
-  printf 'Who Am I.app does not point to this verified product version.\n' >&2
+if [[ "$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "${app_plist}")" \
+  != "ai.intuition.whoami" \
+  || "$(/usr/bin/plutil -extract CFBundleExecutable raw -o - "${app_plist}")" \
+  != "WhoAmI" \
+  || "$(/usr/bin/plutil -extract WhoAmIManagedInstall raw -o - "${app_plist}")" \
+  != "true" \
+  || "$(/usr/bin/plutil -extract WhoAmIProductRoot raw -o - "${app_plist}")" \
+  != "${card_root}" \
+  || "$(/usr/bin/plutil -extract WhoAmIPersomeRoot raw -o - "${app_plist}")" \
+  != "${RUNTIME_INSTALL_HOME}" \
+  || "$(/usr/bin/plutil -extract WhoAmIProductVersion raw -o - "${app_plist}")" \
+  != "${product_version}" ]]; then
+  printf 'Who Am I.app does not point to this verified product installation.\n' >&2
+  exit 1
+fi
+if ! /usr/bin/file "${app_executable}" | /usr/bin/grep -Fq 'Mach-O' \
+  || ! /usr/bin/lipo "${app_executable}" -verify_arch arm64 x86_64 \
+  || ! /usr/bin/codesign --verify --strict "${app_bundle}"; then
+  printf 'Who Am I.app is not a verified universal native application.\n' >&2
   exit 1
 fi
 

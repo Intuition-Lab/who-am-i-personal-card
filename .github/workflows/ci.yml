@@ -33,7 +33,13 @@ jobs:
 
       - name: Validate shell syntax
         shell: bash
-        run: bash -n ./*.sh scripts/*.sh scripts/lib/*.sh tests/*.sh
+        run: |
+          bash -n \
+            ./*.sh \
+            scripts/*.sh \
+            scripts/lib/*.sh \
+            tests/*.sh \
+            apps/personal-card/macos/*.sh
 
       - name: Validate Python hook syntax
         shell: bash
@@ -56,7 +62,13 @@ jobs:
 
       - name: Lint shell scripts
         shell: bash
-        run: shellcheck -x ./*.sh scripts/*.sh scripts/lib/*.sh tests/*.sh
+        run: |
+          shellcheck -x \
+            ./*.sh \
+            scripts/*.sh \
+            scripts/lib/*.sh \
+            tests/*.sh \
+            apps/personal-card/macos/*.sh
 
       - name: Lint GitHub Actions workflows
         shell: bash
@@ -156,7 +168,13 @@ jobs:
 
       - name: Validate shell syntax
         shell: bash
-        run: bash -n ./*.sh scripts/*.sh scripts/lib/*.sh tests/*.sh
+        run: |
+          bash -n \
+            ./*.sh \
+            scripts/*.sh \
+            scripts/lib/*.sh \
+            tests/*.sh \
+            apps/personal-card/macos/*.sh
 
       - name: Foundation regression tests
         shell: bash
@@ -169,6 +187,25 @@ jobs:
       - name: Validate installer plan
         shell: bash
         run: bash install.sh --print-plan
+
+      - name: Build universal native app launcher
+        shell: bash
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          output_directory="${RUNNER_TEMP}/native-launcher"
+          bash apps/personal-card/macos/build-native-launcher.sh \
+            --product-root "${RUNNER_TEMP}/product-app/${version}" \
+            --persome-root "${RUNNER_TEMP}/persome" \
+            --product-version "${version}" \
+            --output-directory "${output_directory}"
+          app="${output_directory}/Who Am I.app"
+          lipo "${app}/Contents/MacOS/WhoAmI" \
+            -verify_arch arm64 x86_64
+          codesign --verify --strict "${app}"
+          test "$(
+            plutil -extract WhoAmIProductVersion raw -o - \
+              "${app}/Contents/Info.plist"
+          )" = "${version}"
 
   macos-install:
     name: macOS isolated install (arm64)

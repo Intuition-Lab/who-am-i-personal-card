@@ -2423,6 +2423,14 @@ const server = createServer(async (req, res) => {
         });
         return;
       }
+      if (req.method === "GET" && url.pathname === "/api/app/health") {
+        sendJson(res, 200, {
+          ok: true,
+          productVersion: PRODUCT_VERSION,
+          devMode: DEV_MODE,
+        });
+        return;
+      }
       if (req.method === "GET" && url.pathname === "/api/setup/status") {
         await serveSetupStatus(req, res);
         return;

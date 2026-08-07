@@ -137,7 +137,7 @@ The installer will:
   3. otherwise fetch and verify exactly the pinned Runtime commit;
   4. install or update only the product-managed Runtime path;
   5. never claim, replace, or re-onboard a standalone existing Runtime;
-  6. install the Personal Card and its pinned private Node runtime.
+  6. install the native Who Am I app and its pinned private Node runtime.
 EOF
   if [[ "${INTERACTION_MODE}" == "interactive" ]]; then
     printf '%s\n' \
@@ -148,11 +148,48 @@ EOF
   fi
 }
 
+stop_previous_product_card_server() {
+  local current_uid pid process_uid process_command attempt
+
+  [[ -x /usr/sbin/lsof ]] || return 0
+  current_uid="$(/usr/bin/id -u)"
+  while IFS= read -r pid; do
+    [[ "${pid}" =~ ^[0-9]+$ ]] || continue
+    process_uid="$(
+      /bin/ps -p "${pid}" -o uid= 2>/dev/null \
+        | /usr/bin/tr -d '[:space:]'
+    )"
+    process_command="$(
+      /bin/ps -p "${pid}" -o command= 2>/dev/null || true
+    )"
+    if [[ "${process_uid}" != "${current_uid}" \
+      || "${process_command}" != *"${RUNTIME_INSTALL_HOME}/product-app/"* \
+      || "${process_command}" != *"persome-card-server.mjs"* ]]; then
+      continue
+    fi
+    /bin/kill -TERM "${pid}"
+    for attempt in {1..30}; do
+      if ! /bin/kill -0 "${pid}" 2>/dev/null; then
+        break
+      fi
+      /bin/sleep 0.1
+    done
+    if /bin/kill -0 "${pid}" 2>/dev/null; then
+      printf 'Previous Who Am I service did not stop safely.\n' >&2
+      return 1
+    fi
+  done < <(
+    /usr/sbin/lsof -nP -t -iTCP:8772 -sTCP:LISTEN 2>/dev/null \
+      | /usr/bin/sort -u
+  )
+}
+
 install_personal_card() {
   local source_root="${PRODUCT_ROOT}/apps/personal-card"
   local product_version app_root target_root staging_root
   local architecture node_architecture node_archive node_sha node_directory
-  local applications_root app_bundle executable_path plist_path
+  local applications_root app_bundle executable_path legacy_executable_path
+  local plist_path native_build_root staged_app_bundle previous_app_bundle
   local target_ready=0
 
   product_version="$(tr -d '[:space:]' < "${PRODUCT_ROOT}/VERSION")"
@@ -161,7 +198,8 @@ install_personal_card() {
   staging_root="${temporary_root}/personal-card-${product_version}"
   applications_root="${HOME}/Applications"
   app_bundle="${applications_root}/Who Am I.app"
-  executable_path="${app_bundle}/Contents/MacOS/Who Am I"
+  executable_path="${app_bundle}/Contents/MacOS/WhoAmI"
+  legacy_executable_path="${app_bundle}/Contents/MacOS/Who Am I"
   plist_path="${app_bundle}/Contents/Info.plist"
 
   if [[ ! -d "${source_root}" || -L "${source_root}" \
@@ -172,14 +210,24 @@ install_personal_card() {
   fi
   if [[ -e "${app_bundle}" || -L "${app_bundle}" ]]; then
     if [[ ! -d "${app_bundle}" || -L "${app_bundle}" \
-      || ! -f "${plist_path}" || -L "${plist_path}" \
-      || ! -f "${executable_path}" || -L "${executable_path}" ]]; then
+      || ! -f "${plist_path}" || -L "${plist_path}" ]]; then
       printf 'Who Am I.app exists but is not owned by this product.\n' >&2
       return 1
     fi
     if ! /usr/bin/grep -Fq \
       '<string>ai.intuition.whoami</string>' "${plist_path}" \
-      || ! /usr/bin/grep -Fq '/product-app/' "${executable_path}"; then
+      || {
+        if [[ -f "${executable_path}" && ! -L "${executable_path}" ]]; then
+          ! /usr/bin/grep -Fq \
+            '<key>WhoAmIManagedInstall</key>' "${plist_path}"
+        elif [[ -f "${legacy_executable_path}" \
+          && ! -L "${legacy_executable_path}" ]]; then
+          ! /usr/bin/grep -Fq \
+            '/product-app/' "${legacy_executable_path}"
+        else
+          true
+        fi
+      }; then
       printf 'Who Am I.app exists but is not owned by this product.\n' >&2
       return 1
     fi
@@ -199,6 +247,7 @@ install_personal_card() {
       return 1
     fi
   fi
+  stop_previous_product_card_server
 
   if [[ "${target_ready}" -eq 0 ]]; then
     /bin/mkdir -p "${app_root}" "${staging_root}"
@@ -225,7 +274,6 @@ install_personal_card() {
       "${source_root}/persome-card-server.mjs" \
       "${source_root}/whoami-mcp-proxy.mjs" \
       "${source_root}/WhoAmI v5 · Persome Live.html" \
-      "${source_root}/打开 Persome Card.command" \
       "${source_root}/设置我的 Personal Model.command" \
       "${staging_root}/"
     /bin/cp "${PRODUCT_ROOT}/VERSION" "${staging_root}/product-version"
@@ -272,35 +320,50 @@ install_personal_card() {
         npm ci --omit=dev --ignore-scripts --no-audit --no-fund
     )
     /bin/chmod 0700 \
-      "${staging_root}/打开 Persome Card.command" \
       "${staging_root}/设置我的 Personal Model.command"
     /bin/mv "${staging_root}" "${target_root}"
   fi
 
-  /bin/mkdir -p "${app_bundle}/Contents/MacOS"
-  /bin/chmod 0700 "${app_bundle}" \
-    "${app_bundle}/Contents" "${app_bundle}/Contents/MacOS"
-  {
-    printf '#!/bin/zsh\n'
-    printf 'export PERSOME_ROOT=%q\n' "${RUNTIME_INSTALL_HOME}"
-    printf 'export PERSOME_INSTALL_HOME=%q\n' "${RUNTIME_INSTALL_HOME}"
-    printf 'exec %q\n' "${target_root}/打开 Persome Card.command"
-  } > "${executable_path}"
-  /bin/chmod 0700 "${executable_path}"
-  {
-    printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'
-    printf '%s\n' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
-    printf '%s\n' '<plist version="1.0"><dict>'
-    printf '%s\n' '<key>CFBundleName</key><string>Who Am I</string>'
-    printf '%s\n' '<key>CFBundleDisplayName</key><string>Who Am I</string>'
-    printf '%s\n' '<key>CFBundleIdentifier</key><string>ai.intuition.whoami</string>'
-    printf '<key>CFBundleVersion</key><string>%s</string>\n' "${product_version}"
-    printf '%s\n' '<key>CFBundlePackageType</key><string>APPL</string>'
-    printf '%s\n' '<key>CFBundleExecutable</key><string>Who Am I</string>'
-    printf '%s\n' '<key>LSMinimumSystemVersion</key><string>13.0</string>'
-    printf '%s\n' '</dict></plist>'
-  } > "${plist_path}"
-  /bin/chmod 0600 "${plist_path}"
+  if [[ ! -f "${source_root}/macos/WhoAmIApp.swift" \
+    || -L "${source_root}/macos/WhoAmIApp.swift" \
+    || ! -f "${source_root}/macos/build-native-launcher.sh" \
+    || -L "${source_root}/macos/build-native-launcher.sh" ]]; then
+    printf 'Native Who Am I launcher source is missing or unsafe.\n' >&2
+    return 1
+  fi
+  native_build_root="${temporary_root}/native-launcher"
+  /bin/bash "${source_root}/macos/build-native-launcher.sh" \
+    --product-root "${target_root}" \
+    --persome-root "${RUNTIME_INSTALL_HOME}" \
+    --product-version "${product_version}" \
+    --output-directory "${native_build_root}"
+  staged_app_bundle="${native_build_root}/Who Am I.app"
+  if [[ ! -d "${staged_app_bundle}" \
+    || ! -f "${staged_app_bundle}/Contents/MacOS/WhoAmI" \
+    || ! -f "${staged_app_bundle}/Contents/Info.plist" ]]; then
+    printf 'Native Who Am I launcher build is incomplete.\n' >&2
+    return 1
+  fi
+
+  if [[ -e "${applications_root}" || -L "${applications_root}" ]]; then
+    runtime_secure_owned_directory_verify "${applications_root}"
+  else
+    /bin/mkdir "${applications_root}"
+    /bin/chmod 0700 "${applications_root}"
+  fi
+  if [[ -e "${app_bundle}" || -L "${app_bundle}" ]]; then
+    previous_app_bundle="${temporary_root}/previous-Who-Am-I.app"
+    /bin/mv "${app_bundle}" "${previous_app_bundle}"
+  fi
+  if ! /bin/mv "${staged_app_bundle}" "${app_bundle}"; then
+    if [[ -n "${previous_app_bundle:-}" \
+      && -d "${previous_app_bundle}" \
+      && ! -e "${app_bundle}" ]]; then
+      /bin/mv "${previous_app_bundle}" "${app_bundle}" || true
+    fi
+    printf 'Could not install the native Who Am I app.\n' >&2
+    return 1
+  fi
   printf 'Installed Who Am I to %s\n' "${app_bundle}"
 }
 
@@ -698,6 +761,29 @@ Who Am I connected to:
   ${RUNTIME_INSTALL_HOME}
 
 No Runtime files, model data, permissions, or MCP client settings were changed.
+Who Am I is installed in:
+
+  ${HOME}/Applications/Who Am I.app
+EOF
+  if [[ "${INTERACTION_MODE}" == "interactive" ]]; then
+    /usr/bin/open "${HOME}/Applications/Who Am I.app" || true
+  fi
+  exit 0
+fi
+if [[ "${MANAGED_EXISTING}" -eq 1 \
+  && "${ACTIVE_EXISTING_LOCK}" == "${TARGET_RUNTIME_LOCK}" ]]; then
+  temporary_root="$(runtime_temporary_root_create "personal-model-product")"
+  runtime_checkout_create "${temporary_root}/runtime"
+  runtime_checkout_verify "${temporary_root}/runtime"
+  install_management_bundle "${temporary_root}/runtime"
+  install_personal_card
+  /bin/bash "${PRODUCT_ROOT}/scripts/verify.sh" --quick
+  /bin/bash "${PRODUCT_ROOT}/scripts/verify-product.sh"
+  cat <<EOF
+
+The installed Personal Model already matches this product's pinned Runtime.
+Its executables, permissions, and model data were preserved.
+
 Who Am I is installed in:
 
   ${HOME}/Applications/Who Am I.app
