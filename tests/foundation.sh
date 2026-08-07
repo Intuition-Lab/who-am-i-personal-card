@@ -55,6 +55,9 @@ export HOME="${TEST_HOME}"
 export TMPDIR="${TEST_TMPDIR}"
 unset PERSOME_INSTALL_HOME
 unset PERSOME_PYTHON
+# GitHub Actions injects this globally. Release-decision fixtures must control
+# the expected commit explicitly instead of inheriting the workflow commit.
+unset GITHUB_SHA
 
 # shellcheck source=scripts/lib/runtime-lock.sh
 source "${RUNTIME_LIBRARY}"
@@ -1716,6 +1719,8 @@ test_repository_bootstrap_check_accepts_clean_mock() {
     "${fixture_root}/scripts/bootstrap-github-repository.sh"
   chmod 0700 "${fixture_root}/scripts/bootstrap-github-repository.sh"
   {
+    # These expressions are intentionally literal source for the mock CLI.
+    # shellcheck disable=SC2016
     printf '%s\n' \
       '#!/usr/bin/env bash' \
       'set -euo pipefail' \
