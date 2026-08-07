@@ -1,0 +1,35 @@
+{
+  "name": "personal-card-v5-persome-live",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.10"
+  },
+  "scripts": {
+    "build": "node scripts/sync-live-bundle.mjs",
+    "start": "node persome-card-server.mjs",
+    "test": "node --test",
+    "test:browser": "npm run build && node tests/browser/runtime-switch.mjs",
+    "test:production-browser": "npm run build && node tests/browser/production-owner.mjs",
+    "test:contract": "node --test tests/contract",
+    "visual:baseline": "npm run build && node tests/browser/runtime-switch.mjs --output tests/visual/current"
+  },
+  "exports": {
+    "./personal-model-card": {
+      "types": "./src/contracts/personal-model-card.d.mts",
+      "import": "./src/contracts/personal-model-card.mjs"
+    },
+    "./personal-model-card.schema.json": "./src/contracts/personal-model-card.schema.json",
+    "./public-personal-model-card.schema.json": "./src/contracts/public-personal-model-card.schema.json",
+    "./personal-model-grant.schema.json": "./src/contracts/personal-model-grant.schema.json",
+    "./personal-model-evidence.schema.json": "./src/contracts/personal-model-evidence.schema.json"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.62.1"
+  }
+}

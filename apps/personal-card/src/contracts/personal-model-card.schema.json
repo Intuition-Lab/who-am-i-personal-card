@@ -1,0 +1,224 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://whoami.local/schemas/personal-model-card.schema.json",
+  "title": "PersonalModelCardSnapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "model",
+    "authorization",
+    "card",
+    "personalModel",
+    "now",
+    "time",
+    "identity",
+    "connectors",
+    "reports"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "displayName", "handle", "memberNumber", "sinceYear", "status"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "displayName": { "type": "string", "minLength": 1 },
+        "handle": { "type": "string", "pattern": "^@[A-Za-z0-9_.-]+$" },
+        "memberNumber": { "type": "string" },
+        "sinceYear": { "type": "integer", "minimum": 2000 },
+        "status": { "enum": ["online", "offline", "snapshot"] },
+        "avatarUrl": { "type": "string" }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["viewerMode", "scopes"],
+      "properties": {
+        "viewerMode": { "enum": ["owner", "authorized", "public"] },
+        "grantId": { "type": "string" },
+        "scopes": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "expiresAt": { "type": ["string", "null"], "format": "date-time" },
+        "audience": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "viewerMode": { "const": "authorized" } },
+            "required": ["viewerMode"]
+          },
+          "then": {
+            "properties": {
+              "grantId": { "type": "string" },
+              "expiresAt": { "type": "string", "format": "date-time" },
+              "audience": { "type": "string", "minLength": 1 }
+            },
+            "required": ["grantId", "expiresAt", "audience"]
+          }
+        }
+      ]
+    },
+    "card": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["monthYear", "tagline", "publicUrl", "glyph"],
+      "properties": {
+        "monthYear": { "type": "string" },
+        "tagline": { "type": "string" },
+        "publicUrl": { "type": "string" },
+        "material": { "type": "string" },
+        "glyph": {
+          "type": "array",
+          "minItems": 25,
+          "maxItems": 25,
+          "items": { "type": "boolean" }
+        }
+      }
+    },
+    "personalModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["memoryCount", "root", "faces", "updatedAt"],
+      "properties": {
+        "memoryCount": { "type": "integer", "minimum": 0 },
+        "root": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "faces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "text", "observations", "confidence"],
+            "properties": {
+              "id": { "type": "string" },
+              "text": { "type": "string" },
+              "observations": { "type": "integer", "minimum": 0 },
+              "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+              "evidenceRefs": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "now": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items"],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "kind", "title", "why", "when"],
+            "properties": {
+              "id": { "type": "string" },
+              "kind": { "enum": ["past", "present", "future"] },
+              "title": { "type": "string" },
+              "why": { "type": "string" },
+              "when": { "type": "string" },
+              "dayId": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "time": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["days"],
+      "properties": {
+        "days": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "title", "portrait", "events"],
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "portrait": { "type": "string" },
+              "letter": { "type": "string" },
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["id", "time", "title", "detail"],
+                  "properties": {
+                    "id": { "type": "string" },
+                    "time": { "type": "string" },
+                    "title": { "type": "string" },
+                    "detail": { "type": "string" },
+                    "app": { "type": "string" },
+                    "evidenceRef": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "dailyLine", "weeklyLetter"],
+      "properties": {
+        "description": { "type": "string" },
+        "dailyLine": { "type": "string" },
+        "weeklyLetter": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "connectors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "product", "status"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "product": { "type": "string" },
+          "status": { "enum": ["connected", "available", "missing", "connecting"] },
+          "iconUrl": { "type": "string" },
+          "sessionId": { "type": "string" }
+        }
+      }
+    },
+    "reports": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "modelId", "connectorId", "title", "summary", "updatedAt", "readCount", "evidenceCount", "sections", "evidenceRefs"],
+        "properties": {
+          "id": { "type": "string" },
+          "modelId": { "type": "string" },
+          "connectorId": { "type": "string" },
+          "title": { "type": "string" },
+          "summary": { "type": "string" },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "readCount": { "type": "integer", "minimum": 0 },
+          "evidenceCount": { "type": "integer", "minimum": 0 },
+          "sections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "title", "body"],
+              "properties": {
+                "kind": { "enum": ["lead", "understanding", "evidence", "note"] },
+                "title": { "type": "string" },
+                "body": { "type": "string" }
+              }
+            }
+          },
+          "evidenceRefs": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

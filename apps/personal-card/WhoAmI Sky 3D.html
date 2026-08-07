@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memory Sky · 3D</title>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.184.0/build/three.module.js",
+    "three/addons/controls/OrbitControls.js": "https://unpkg.com/three@0.184.0/examples/jsm/controls/OrbitControls.js",
+    "three/addons/exporters/OBJExporter.js": "https://unpkg.com/three@0.184.0/examples/jsm/exporters/OBJExporter.js",
+    "three/addons/exporters/GLTFExporter.js": "https://unpkg.com/three@0.184.0/examples/jsm/exporters/GLTFExporter.js"
+  },
+  "integrity": {
+    "https://unpkg.com/three@0.184.0/build/three.module.js": "sha384-8FCZ1eVO6it4+pbec2aDtnTrwjWXZLJRC+MAGCIPDgsYnUrl/E0A2YlF8ioMKI/J",
+    "https://unpkg.com/three@0.184.0/build/three.core.js": "sha384-dw2ooPewaEIrAgl6oFDBmmBWCE9oW9LxRGcfwZ0hLvEprzo202wXl7vCYHRlSnOT",
+    "https://unpkg.com/three@0.184.0/examples/jsm/controls/OrbitControls.js": "sha384-4rziNxOBZKQ69i+w+f89KJ55TCYquwchVbByQwmaOeIOXdOU2PLDn3kOfXHwIJC9",
+    "https://unpkg.com/three@0.184.0/examples/jsm/exporters/OBJExporter.js": "sha384-nbwtoZENJD3Vq+ACK0CuGQdPMuDWHkamC2KJD70EV5nfg6jQjfppKOea07YJN+N3",
+    "https://unpkg.com/three@0.184.0/examples/jsm/exporters/GLTFExporter.js": "sha384-VofkvpG6HERhFCYbsUOHeNXBCqID2nfqkQqnVzE1jc/oPcz+qJ13ADdXH08hE+cQ"
+  }
+}
+</script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;background:#07070A}
+body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue','PingFang SC',sans-serif;color:#F5F5F4;-webkit-font-smoothing:antialiased}
+a{color:rgba(235,238,250,.5);text-decoration:none}
+a:hover{color:#F5F5F4}
+#c{position:fixed;inset:0;display:block;cursor:grab}
+#c.pick{cursor:pointer}
+#c:active{cursor:grabbing}
+.mono{font-family:'SF Mono',ui-monospace,Menlo,monospace}
+.hud{position:fixed;z-index:5;font-size:9.5px;letter-spacing:.22em;color:rgba(235,238,250,.4)}
+#wander{display:inline-flex;align-items:center;gap:7px;border:1px solid rgba(255,255,255,.16);border-radius:99px;padding:6px 14px;cursor:pointer;font-size:11px;letter-spacing:.12em;color:rgba(235,238,250,.6);user-select:none;transition:all .2s}
+#wander:hover{color:#F5F5F4;background:rgba(255,255,255,.06)}
+#wander.on{background:#F5F5F4;color:#0B0B0D;border-color:transparent}
+#wander.on i{background:#0B0B0D}
+#wander i{width:5px;height:5px;border-radius:50%;background:rgba(235,238,250,.5)}
+#card{position:fixed;left:50%;bottom:34px;transform:translateX(-50%) translateY(14px);width:min(480px,88vw);z-index:6;background:rgba(14,14,18,.92);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:14px 17px;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);box-shadow:0 24px 60px -16px rgba(0,0,0,.6);opacity:0;pointer-events:none;transition:opacity .3s,transform .3s}
+#card.on{opacity:1;pointer-events:auto;transform:translateX(-50%) translateY(0)}
+#card .hd{display:flex;align-items:baseline;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,.1);padding-bottom:8px;margin-bottom:11px}
+#card .txt{font-family:'Iowan Old Style',Palatino,'Songti SC',Georgia,serif;font-size:13.5px;line-height:1.9;color:#F5F5F4}
+#card .ft{display:flex;gap:10px;align-items:baseline;font-size:9px;color:rgba(235,238,250,.45);margin-top:12px}
+#x{cursor:pointer;font-size:13px;line-height:1;color:rgba(235,238,250,.45)}
+#x:hover{color:#F5F5F4}
+@media (prefers-reduced-motion: reduce){#card{transition:none}}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hud mono" style="top:18px;left:24px">MEMORY SKY · 3D · 3,266 · 每晚重建</div>
+<div class="hud" style="top:14px;right:24px;display:flex;align-items:center;gap:14px;letter-spacing:normal">
+  <span id="wander" class="mono"><i></i>WANDER 漫游</span>
+  <a href="WhoAmI v5.dc.html" class="mono" style="letter-spacing:.22em;font-size:9.5px">← 回到卡</a>
+</div>
+<div class="hud mono" style="left:24px;bottom:20px;letter-spacing:.1em">星 = 记忆段 · 线 = 同一件事 · 星座 = 主题 · 拖动环视 · 滚轮推近</div>
+<div class="hud mono" style="right:24px;bottom:20px;letter-spacing:.1em;color:rgba(235,238,250,.3)">点亮星,镜头会飞过去 · ← → 巡星 · esc 回全景</div>
+<div id="card">
+  <div class="hd">
+    <span class="mono" id="kind" style="font-size:8.5px;letter-spacing:.32em;color:rgba(235,238,250,.45)"></span>
+    <span style="display:flex;align-items:center;gap:10px"><span class="mono" style="font-size:8.5px;color:rgba(235,238,250,.45)">← → 巡星</span><span id="x">×</span></span>
+  </div>
+  <div class="txt" id="txt"></div>
+  <div class="ft mono"><span id="meta" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span></div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const FACTS = [
+  { k: '画像', t: '她判断一件事，先问「哪条路错了代价最小」。', r: 'face_012 · 引用 3 段', f: '上次验证 · 7/30' },
+  { k: '习惯', t: '过去一周有五个晚上，你在 21:30 后回到卡片文案。', r: 'pattern_007 · 引用 5 段', f: '基于最近 14 天' },
+  { k: '画像', t: '写规范时她会先把边界写死，再往里填功能。', r: 'face_009 · 引用 2 段', f: '上次验证 · 7/29' },
+  { k: '段', t: '7 月修过一次回声消除链路——两天，从 WebRTC 文档啃起。', r: 'cap-0714-1120', f: '3 周前 · 权重降低中' },
+  { k: '习惯', t: '你回天翊的消息永远最快，回投资人的最慢。', r: 'pattern_004 · 引用 11 段', f: '基于最近 30 天' },
+  { k: '画像', t: '偏好根因修复，而不是绕过去。', r: 'face_011 · 引用 PR #71', f: '上次验证 · 7/31' }
+];
+const ROOT_FACT = { k: 'ROOT · 我是谁', t: '做产品的人。信可回滚的决定、可溯源的话。正在教一个 model 成为自己——这句话本身，也在被每一天改写。', r: 'root_1 · rebuilt nightly', f: '由全部 3,266 条记忆推出' };
+const THEMES = [
+  { n: 'persome', sub: '42h · 19 段', c: '#8FA6FF', p: [-30, 3, -4], s: 22, rad: 14 },
+  { n: 'spec · 隔离', sub: '18h · 8 段', c: '#7EDCC4', p: [26, 15, -20], s: 12, rad: 10 },
+  { n: '卡片文案', sub: '9h · 6 段', c: '#F2B0C4', p: [25, -11, 15], s: 10, rad: 9 },
+  { n: 'index.db', sub: '6h · 3 段', c: '#F3CE8C', p: [-20, 17, 19], s: 8, rad: 8 },
+  { n: '战略会', sub: '4h · 2 段', c: '#BCA9F2', p: [-32, -14, 17], s: 6, rad: 7 },
+  { n: '融资', sub: '2h · 1 段', c: '#93D2EE', p: [42, -2, 4], s: 4, rad: 6 }
+];
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x07070a);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 1200);
+camera.position.set(0, 30, REDUCED ? 115 : 235);
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true; controls.dampingFactor = 0.06;
+controls.minDistance = 20; controls.maxDistance = 320;
+controls.autoRotateSpeed = 0.35;
+
+// -- textures --
+function glowTex(hex, coreWhite) {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+  const g = cv.getContext('2d');
+  const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, coreWhite ? 'rgba(255,255,255,1)' : hexA(hex, 1));
+  gr.addColorStop(0.18, hexA(hex, 0.9));
+  gr.addColorStop(0.42, hexA(hex, 0.22));
+  gr.addColorStop(1, hexA(hex, 0));
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(cv);
+}
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
+}
+function labelTex(name, sub, color) {
+  const cv = document.createElement('canvas');
+  const g = cv.getContext('2d');
+  g.font = '600 40px -apple-system, "PingFang SC", sans-serif';
+  const w = Math.max(g.measureText(name).width, 150) + 20;
+  cv.width = Math.ceil(w); cv.height = 96;
+  const gg = cv.getContext('2d');
+  gg.textAlign = 'center';
+  gg.font = '600 40px -apple-system, "PingFang SC", sans-serif';
+  gg.fillStyle = color; gg.shadowColor = 'rgba(0,0,0,.9)'; gg.shadowBlur = 12;
+  gg.fillText(name, cv.width / 2, 42);
+  gg.font = '26px "SF Mono", Menlo, monospace';
+  gg.fillStyle = 'rgba(232,234,245,.5)'; gg.shadowBlur = 0;
+  gg.fillText(sub, cv.width / 2, 80);
+  const t = new THREE.CanvasTexture(cv); t.userData = { ar: cv.width / cv.height };
+  return t;
+}
+
+// -- galaxy group (blooms in) --
+const galaxy = new THREE.Group();
+scene.add(galaxy);
+
+// star shell backdrop
+{
+  const N = 1600, pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    const v = new THREE.Vector3().randomDirection().multiplyScalar(380 + Math.random() * 60);
+    pos.set([v.x, v.y, v.z], i * 3);
+    const b = 0.25 + Math.random() * 0.6, blue = Math.random() < 0.25;
+    col.set(blue ? [b * 0.75, b * 0.82, b] : [b, b, b * 0.97], i * 3);
+  }
+  const ge = new THREE.BufferGeometry();
+  ge.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  ge.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  var shell = new THREE.Points(ge, new THREE.PointsMaterial({ size: 1.1, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.75, depthWrite: false }));
+  scene.add(shell);
+}
+
+const clusters = [], brights = [];
+const rand = i => ((i * 2654435761) % 97) / 97;
+
+THEMES.forEach((T, ti) => {
+  const center = new THREE.Vector3(...T.p);
+  const starTex = glowTex(T.c, true);
+  const reg = { stars: [], lines: [], mist: null, label: null, center, curTween: null };
+  const hubs = [];
+  for (let i = 0; i < T.s; i++) {
+    const a = (i * 137.5 + ti * 61) * Math.PI / 180, b = (i * 77 + ti * 31) * Math.PI / 180;
+    const rr = T.rad * Math.cbrt(rand(i + ti * 7));
+    const p = center.clone().add(new THREE.Vector3(Math.cos(a) * Math.cos(b) * rr, Math.sin(b) * rr * 0.55, Math.sin(a) * Math.cos(b) * rr));
+    const bright = i === 0 || i % 4 === 1;
+    const age = (i * 5 + ti * 3) % 28, rec = 1 - age / 28;
+    const mat = new THREE.SpriteMaterial({ map: starTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: bright ? 0.65 + rec * 0.35 : 0.3 + rec * 0.35 });
+    mat.userData = { base: mat.opacity };
+    const sp = new THREE.Sprite(mat);
+    sp.position.copy(p);
+    const sc = i === 0 ? 5 : bright ? 3.1 : 1.35;
+    sp.scale.setScalar(sc);
+    sp.userData = { bright, ti, fi: bright ? (ti * 3 + i) % FACTS.length : -1, baseScale: sc };
+    galaxy.add(sp); reg.stars.push(sp);
+    if (bright) { brights.push(sp); if (hubs.length < 5) hubs.push(p); }
+  }
+  // filaments: hub chain + root spoke
+  const mkLine = (pts, op) => {
+    const m = new THREE.LineBasicMaterial({ color: T.c, transparent: true, opacity: op, depthWrite: false, blending: THREE.AdditiveBlending });
+    m.userData = { base: op };
+    const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), m);
+    galaxy.add(l); reg.lines.push(l);
+  };
+  if (hubs.length > 1) mkLine(hubs, 0.3);
+  mkLine([new THREE.Vector3(0, 0, 0), hubs[0]], 0.12);
+  // mist
+  const mm = new THREE.SpriteMaterial({ map: glowTex(T.c, false), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.11 });
+  mm.userData = { base: 0.11 };
+  reg.mist = new THREE.Sprite(mm);
+  reg.mist.position.copy(center);
+  reg.mist.scale.setScalar(T.rad * 4.6);
+  galaxy.add(reg.mist);
+  // label
+  const lt = labelTex(T.n, T.sub, T.c);
+  const lm = new THREE.SpriteMaterial({ map: lt, transparent: true, depthWrite: false, opacity: 0.95 });
+  lm.userData = { base: 0.95 };
+  reg.label = new THREE.Sprite(lm);
+  reg.label.position.copy(center).add(new THREE.Vector3(0, T.rad * 0.85 + 4.5, 0));
+  reg.label.scale.set(9 * lt.userData.ar * (96 / 40) * 0.42, 9, 1);
+  galaxy.add(reg.label);
+  clusters.push(reg);
+});
+
+// scatter field + root
+const scatterReg = { stars: [], lines: [], mist: null, label: null };
+for (let i = 0; i < 26; i++) {
+  const m = new THREE.SpriteMaterial({ map: glowTex('#EBEEFA', false), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.22 });
+  m.userData = { base: 0.22 };
+  const sp = new THREE.Sprite(m);
+  sp.position.set((rand(i) - 0.5) * 130, (rand(i + 40) - 0.5) * 60, (rand(i + 80) - 0.5) * 110);
+  sp.scale.setScalar(1.1);
+  galaxy.add(sp); scatterReg.stars.push(sp);
+}
+const rootSp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex('#C8D2FF', true), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 1 }));
+rootSp.scale.setScalar(7.5);
+rootSp.userData = { bright: true, ti: -2, fi: 99, baseScale: 7.5 };
+galaxy.add(rootSp); brights.push(rootSp);
+
+// -- tween engine --
+const tweens = [];
+const easeIO = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+const easeO = t => 1 - Math.pow(1 - t, 3);
+function tween(dur, fn, ease = easeIO, done) { tweens.push({ t0: performance.now(), dur, fn, ease, done }); }
+
+// opening bloom
+if (!REDUCED) {
+  galaxy.scale.setScalar(0.06);
+  tween(1700, k => galaxy.scale.setScalar(0.06 + 0.94 * k), easeO);
+  const from = camera.position.clone(), to = new THREE.Vector3(0, 16, 112);
+  tween(2100, k => camera.position.lerpVectors(from, to, k), easeIO, () => { auto = true; });
+} else { camera.position.set(0, 16, 112); }
+
+// -- focus + selection --
+let focusTi = -1, selected = null, auto = REDUCED ? false : false, idleT = null, wander = false, lastWander = 0;
+function setFocus(ti) {
+  focusTi = ti;
+  const all = clusters.concat([scatterReg]);
+  all.forEach((reg, i) => {
+    const isScatter = i === clusters.length;
+    const own = !isScatter && i === ti;
+    const starT = ti < 0 ? 1 : own ? 1 : 0.13;
+    const lineT = ti < 0 ? 1 : own ? 2.6 : 0.14;
+    const mistT = ti < 0 ? 1 : own ? 1.3 : 0.22;
+    const labelT = ti < 0 ? 1 : own ? 1 : 0.08;
+    const snap = [];
+    reg.stars.forEach(s => snap.push([s.material, s.material.opacity, s.material.userData.base * starT]));
+    reg.lines.forEach(l => snap.push([l.material, l.material.opacity, Math.min(0.85, l.material.userData.base * lineT)]));
+    if (reg.mist) snap.push([reg.mist.material, reg.mist.material.opacity, Math.min(0.2, reg.mist.material.userData.base * mistT)]);
+    if (reg.label) snap.push([reg.label.material, reg.label.material.opacity, reg.label.material.userData.base * labelT]);
+    tween(520, k => snap.forEach(([m, a, b]) => m.opacity = a + (b - a) * k));
+  });
+}
+const card = document.getElementById('card');
+function showCard(f) {
+  document.getElementById('kind').textContent = f.k;
+  document.getElementById('txt').textContent = f.t;
+  document.getElementById('meta').textContent = f.f + ' · ' + f.r;
+  card.classList.add('on');
+}
+function glideTo(pos, dist) {
+  const t0 = controls.target.clone(), t1 = pos.clone();
+  const dir = camera.position.clone().sub(pos).normalize();
+  const side = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize();
+  const p0 = camera.position.clone();
+  const p1 = pos.clone().add(dir.multiplyScalar(0.85).add(side.multiplyScalar(0.5)).normalize().multiplyScalar(dist)).add(new THREE.Vector3(0, dist * 0.16, 0));
+  tween(REDUCED ? 1 : 1450, k => { controls.target.lerpVectors(t0, t1, k); camera.position.lerpVectors(p0, p1, k); });
+}
+function select(sp) {
+  if (selected && selected !== sp) { const s = selected, f0 = s.scale.x, b = s.userData.baseScale; tween(300, k => s.scale.setScalar(f0 + (b - f0) * k)); }
+  selected = sp;
+  const b1 = sp.userData.baseScale, f1 = sp.scale.x;
+  tween(380, k => sp.scale.setScalar(f1 + (b1 * 1.5 - f1) * easeO(k)));
+  const wp = sp.getWorldPosition(new THREE.Vector3());
+  glideTo(wp, sp.userData.ti === -2 ? 46 : 26);
+  setFocus(sp.userData.ti >= 0 ? sp.userData.ti : -1);
+  showCard(sp.userData.fi === 99 ? ROOT_FACT : FACTS[sp.userData.fi]);
+}
+function clearSel() {
+  wander = false; wanderBtn.classList.remove('on');
+  if (selected) { const s = selected, f = s.scale.x, b = s.userData.baseScale; tween(300, k => s.scale.setScalar(f + (b - f) * k)); }
+  selected = null; setFocus(-1); card.classList.remove('on');
+  glideTo(new THREE.Vector3(0, 0, 0), 112);
+}
+
+// -- picking --
+const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
+let downAt = null;
+canvas.addEventListener('pointerdown', e => downAt = [e.clientX, e.clientY]);
+canvas.addEventListener('pointerup', e => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
+  ptr.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ptr, camera);
+  const hit = ray.intersectObjects(brights, false)[0];
+  if (hit) { wander = false; wanderBtn.classList.remove('on'); select(hit.object); }
+  else if (selected) clearSel();
+});
+canvas.addEventListener('pointermove', e => {
+  ptr.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ptr, camera);
+  canvas.classList.toggle('pick', ray.intersectObjects(brights, false).length > 0);
+});
+document.getElementById('x').addEventListener('click', clearSel);
+addEventListener('keydown', e => {
+  if (e.key === 'Escape') { clearSel(); return; }
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  e.preventDefault();
+  const i = brights.indexOf(selected), step = e.key === 'ArrowRight' ? 1 : -1;
+  select(brights[((i < 0 ? (step > 0 ? -1 : 1) : i) + step + brights.length) % brights.length]);
+});
+
+// autorotate idle handling + wander
+controls.addEventListener('start', () => { auto = false; clearTimeout(idleT); });
+controls.addEventListener('end', () => { idleT = setTimeout(() => auto = !REDUCED, 4000); });
+const wanderBtn = document.getElementById('wander');
+wanderBtn.addEventListener('click', () => {
+  wander = !wander; wanderBtn.classList.toggle('on', wander);
+  if (wander) { lastWander = 0; }
+});
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+
+renderer.setAnimationLoop(t => {
+  const now = performance.now();
+  for (let i = tweens.length - 1; i >= 0; i--) {
+    const tw = tweens[i], k = Math.min(1, (now - tw.t0) / tw.dur);
+    tw.fn(tw.ease(k));
+    if (k >= 1) { tweens.splice(i, 1); tw.done && tw.done(); }
+  }
+  if (wander && now - lastWander > 7000) {
+    lastWander = now;
+    let n; do { n = brights[Math.floor(Math.random() * brights.length)]; } while (n === selected);
+    select(n);
+  }
+  shell.rotation.y += 0.00012;
+  rootSp.scale.setScalar(rootSp.userData.baseScale * (selected === rootSp ? 1.5 : 1) * (1 + 0.05 * Math.sin(t * 0.0018)));
+  clusters.forEach((reg, i) => {
+    reg.mist.position.copy(reg.center).add(new THREE.Vector3(Math.sin(t * 0.0003 + i) * 1.6, Math.cos(t * 0.00024 + i * 2) * 1.1, 0));
+  });
+  controls.autoRotate = auto && !selected;
+  controls.update();
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

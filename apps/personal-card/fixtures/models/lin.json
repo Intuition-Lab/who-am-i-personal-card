@@ -1,0 +1,93 @@
+{
+  "schemaVersion": "1.0.0",
+  "model": {
+    "id": "lin-demo",
+    "displayName": "Lin",
+    "handle": "@lin",
+    "memberNumber": "042",
+    "sinceYear": 2025,
+    "status": "snapshot"
+  },
+  "authorization": {
+    "viewerMode": "authorized",
+    "grantId": "grant_lin_demo_viewer",
+    "scopes": ["card:read", "identity:read", "now:read", "rewind:read", "evidence:read", "reports:read", "model:search", "connectors:read"],
+    "expiresAt": "2026-08-08T08:00:00+08:00",
+    "audience": "personal-card-v5"
+  },
+  "card": {
+    "monthYear": "AUGUST / 2026",
+    "tagline": "Designing quieter tools for cities",
+    "publicUrl": "pm.app/lin",
+    "material": "ceramic",
+    "glyph": [false,true,false,true,false,true,true,false,true,true,false,true,true,true,false,true,false,true,false,true,false,true,false,true,false]
+  },
+  "personalModel": {
+    "memoryCount": 874,
+    "root": "用观察、田野调查和原型，把复杂的城市体验变成安静而可用的工具。",
+    "updatedAt": "2026-08-07T07:30:00+08:00",
+    "faces": [
+      {
+        "id": "face_lin_01",
+        "text": "做决定前会先回到真实使用现场，而不是只讨论抽象需求。",
+        "observations": 61,
+        "confidence": 0.91,
+        "evidenceRefs": ["lin-demo:event:2026-08-06:02"]
+      },
+      {
+        "id": "face_lin_02",
+        "text": "偏好低干扰、能够融入日常环境的交互方式。",
+        "observations": 48,
+        "confidence": 0.88,
+        "evidenceRefs": ["lin-demo:event:2026-08-05:04"]
+      }
+    ]
+  },
+  "now": {
+    "items": [
+      {"id":"l-now-1","kind":"past","title":"社区步行访谈","why":"回到一个改变设计方向的现场","when":"上周","dayId":"2026-08-01"},
+      {"id":"l-now-2","kind":"present","title":"整理城市夜间导航原型","why":"接上昨天的田野记录","when":"现在","dayId":"2026-08-07"},
+      {"id":"l-now-3","kind":"future","title":"验证新的触觉提示","why":"让提醒更安静地进入日常","when":"明天","dayId":"2026-08-08"}
+    ]
+  },
+  "time": {
+    "days": [
+      {
+        "id": "2026-08-07",
+        "title": "Thursday, August 7",
+        "portrait": "今天的你没有继续画界面，而是重新整理了现场里真正让人犹豫的时刻。",
+        "letter": "一个更小的提示，可能比一张更完整的地图更接近问题。",
+        "events": [
+          {"id":"l-event-1","time":"09:40","title":"夜间导航 · 田野记录","detail":"整理三段步行访谈，并标记用户停下来的位置。","app":"Notes","evidenceRef":"lin-demo:event:2026-08-07:01"},
+          {"id":"l-event-2","time":"15:20","title":"触觉提示 · 原型","detail":"把视觉提醒缩减成两种触觉节奏。","app":"Figma","evidenceRef":"lin-demo:event:2026-08-07:02"}
+        ]
+      }
+    ]
+  },
+  "identity": {
+    "description": "Urban interaction designer working between field research, public space and calm technology.",
+    "dailyLine": "今天的你把地图变小了一点，把现场放大了一点。",
+    "weeklyLetter": ["这一周，你一直在寻找一种不需要用户停下来的导航。","真正改变方向的不是界面，而是一次夜间步行。","你开始相信，最好的提示也许只需要被身体感觉到。"]
+  },
+  "connectors": [
+    {"id":"claude-code","name":"Claude","product":"Claude Code","status":"available"},
+    {"id":"codex","name":"GPT","product":"Codex","status":"connected","sessionId":"cs_lin_codex"}
+  ],
+  "reports": [
+    {
+      "id":"report_lin_codex_01",
+      "modelId":"lin-demo",
+      "connectorId":"codex",
+      "title":"夜间导航原型 · Context",
+      "summary":"GPT 把访谈、原型和长期设计偏好整理成了一页。",
+      "updatedAt":"2026-08-07T07:30:00+08:00",
+      "readCount":1,
+      "evidenceCount":3,
+      "sections":[
+        {"kind":"lead","title":"这页在说什么","body":"当前原型的关键不是增加路径信息，而是降低夜间行走时的注意力负担。"},
+        {"kind":"understanding","title":"当前理解","body":"Lin 正在把一次田野观察转译成更安静的触觉交互，而不是继续扩展视觉界面。"}
+      ],
+      "evidenceRefs":["lin-demo:face:01","lin-demo:event:2026-08-07:01","lin-demo:event:2026-08-07:02"]
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://whoami.local/schemas/personal-model-evidence.schema.json",
+  "title": "PersonalModelEvidenceResponse",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["modelId", "reference", "content"],
+  "properties": {
+    "modelId": { "type": "string", "minLength": 1 },
+    "reference": { "type": "string", "minLength": 3 },
+    "content": {},
+    "receipt": { "type": "string" },
+    "capturedAt": { "type": "string", "format": "date-time" }
+  }
+}

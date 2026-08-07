@@ -1,0 +1,88 @@
+name: Beta bug report
+description: Report an installation or product problem without uploading personal data.
+title: "[Bug] "
+labels: ["bug", "beta"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach `~/.persome`, `HUMAN.md`, captures, database files, API
+        keys, bearer tokens, or logs containing private on-screen content.
+
+  - type: input
+    id: product_version
+    attributes:
+      label: Product version
+      description: Run `cat VERSION` from the product checkout.
+      placeholder: 0.1.0-beta.1
+    validations:
+      required: true
+
+  - type: input
+    id: runtime_commit
+    attributes:
+      label: Runtime commit
+      description: Copy `RUNTIME_COMMIT` from `runtime.lock`.
+      placeholder: Full 40-character commit
+    validations:
+      required: true
+
+  - type: dropdown
+    id: architecture
+    attributes:
+      label: Mac architecture
+      options:
+        - Apple Silicon
+        - Intel
+    validations:
+      required: true
+
+  - type: input
+    id: macos_version
+    attributes:
+      label: macOS version
+      description: Run `sw_vers -productVersion`.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Failure phase
+      options:
+        - Prerequisite check
+        - Runtime download
+        - Runtime installation
+        - macOS permissions
+        - LLM configuration
+        - First model build
+        - Product startup
+        - Product workflow
+        - Upgrade or rollback
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Describe actions and visible errors. Remove personal content.
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Privacy-safe diagnostics
+      description: |
+        Paste the output of `bash "${PERSOME_INSTALL_HOME:-$HOME/.persome}/product-management/scripts/diagnose.sh" --json`.
+        Never paste `persome doctor`, environment files, tokens, captures, or
+        personal model data into a public issue.
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I removed personal content, credentials, tokens, captures, and model data.
+          required: true

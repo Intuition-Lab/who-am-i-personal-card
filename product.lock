@@ -1,0 +1,7 @@
+# Declarative product-shell runtime lock. Parsed as data; never source values
+# that have not first been validated against scripts/lib/product-lock.sh.
+PRODUCT_LOCK_SCHEMA="1"
+PRODUCT_NODE_VERSION="24.15.0"
+PRODUCT_NODE_BASE_URL="https://nodejs.org/dist/v24.15.0"
+PRODUCT_NODE_DARWIN_ARM64_SHA256="af5cfaeafe603aaf7599f287fd9d100bb41f16794f49788fa59dd3f25546930f"
+PRODUCT_NODE_DARWIN_X64_SHA256="5d627245b9f53cb2512cc21b7aa6aad693106affadd91e0c8f42d600fb7ba444"

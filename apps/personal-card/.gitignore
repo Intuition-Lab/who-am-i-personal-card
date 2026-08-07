@@ -1,0 +1,6 @@
+node_modules/
+.whoami-runtime/
+.DS_Store
+playwright-report/
+test-results/
+tests/visual/current/

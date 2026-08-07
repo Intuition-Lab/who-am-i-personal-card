@@ -1,0 +1,4 @@
+interface:
+  display_name: "Use Personal Model"
+  short_description: "Recall and update owner-local Personal Model context"
+  default_prompt: "Use $use-personal-model to answer with relevant, evidence-backed context."

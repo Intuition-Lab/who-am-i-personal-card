@@ -1,0 +1,28 @@
+{
+  "$preview": {
+    "width": 1280,
+    "height": 860
+  },
+  "cardFace": {
+    "editor": "enum",
+    "default": "titanium",
+    "options": [
+      "titanium",
+      "ceramic",
+      "klein",
+      "graphite"
+    ],
+    "tsType": "string",
+    "section": "卡面材质"
+  },
+  "proactiveStyle": {
+    "editor": "enum",
+    "default": "briefing",
+    "options": [
+      "briefing",
+      "push"
+    ],
+    "tsType": "string",
+    "section": "探索 · Proactive 呈现"
+  }
+}

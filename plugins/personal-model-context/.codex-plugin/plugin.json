@@ -1,0 +1,22 @@
+{
+  "name": "personal-model-context",
+  "version": "0.1.0-beta.1",
+  "description": "Recall relevant owner-local Personal Model context on every Codex turn.",
+  "author": {
+    "name": "Intuition Lab"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Personal Model Context",
+    "shortDescription": "Bring relevant local memory into every Codex turn.",
+    "longDescription": "Loads the owner's behavior model and recent activity when a session starts, then recalls relevant durable memory for every user prompt. Recalled data is supplied to the active Codex conversation and treated as untrusted context.",
+    "developerName": "Intuition Lab",
+    "category": "Productivity",
+    "capabilities": [
+      "Automatic session context",
+      "Per-turn memory recall",
+      "Evidence-aware Personal Model use"
+    ],
+    "defaultPrompt": "Use my Personal Model context when it is relevant, and verify stale or conflicted memories before relying on them."
+  }
+}

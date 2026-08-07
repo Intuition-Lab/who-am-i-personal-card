@@ -1,0 +1,10 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Local non-product work and generated output are never released"
+paths = [
+  '''^work/''',
+  '''^outputs/''',
+  '''^dist/''',
+]

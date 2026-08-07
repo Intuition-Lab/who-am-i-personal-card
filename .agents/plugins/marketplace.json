@@ -1,0 +1,20 @@
+{
+  "name": "intuition-lab",
+  "interface": {
+    "displayName": "Intuition Lab"
+  },
+  "plugins": [
+    {
+      "name": "personal-model-context",
+      "source": {
+        "source": "local",
+        "path": "./plugins/personal-model-context"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "description": "Load owner-local Personal Model context without automatic memory writes.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"${PLUGIN_ROOT}/scripts/context_hook.py\"",
+            "timeout": 8,
+            "statusMessage": "Loading Personal Model context",
+            "additionalContextLimit": 0
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"${PLUGIN_ROOT}/scripts/context_hook.py\"",
+            "timeout": 8,
+            "statusMessage": "Recalling relevant Personal Model context",
+            "additionalContextLimit": 0
+          }
+        ]
+      }
+    ]
+  }
+}

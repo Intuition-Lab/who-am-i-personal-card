@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://whoami.local/schemas/public-personal-model-card.schema.json",
+  "title": "PublicPersonalModelCardSnapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "projection",
+    "model",
+    "authorization",
+    "card",
+    "identity"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "projection": { "const": "public" },
+    "model": {
+      "$ref": "https://whoami.local/schemas/personal-model-card.schema.json#/properties/model"
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["viewerMode", "scopes", "expiresAt"],
+      "properties": {
+        "viewerMode": { "const": "public" },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "enum": ["card:read", "identity:read"]
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "expiresAt": { "type": "null" }
+      }
+    },
+    "card": {
+      "$ref": "https://whoami.local/schemas/personal-model-card.schema.json#/properties/card"
+    },
+    "identity": {
+      "$ref": "https://whoami.local/schemas/personal-model-card.schema.json#/properties/identity"
+    }
+  }
+}

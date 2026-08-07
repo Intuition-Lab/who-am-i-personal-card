@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://whoami.local/schemas/personal-model-grant.schema.json",
+  "title": "PersonalModelGrantClaims",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "grantId",
+    "modelId",
+    "scopes",
+    "expiresAt",
+    "audience"
+  ],
+  "properties": {
+    "grantId": { "type": "string", "minLength": 1 },
+    "modelId": { "type": "string", "minLength": 1 },
+    "subject": { "type": "string", "minLength": 1 },
+    "scopes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "audience": { "type": "string", "minLength": 1 },
+    "issuedAt": { "type": "string", "format": "date-time" }
+  }
+}

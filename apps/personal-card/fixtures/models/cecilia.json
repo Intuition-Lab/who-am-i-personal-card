@@ -1,0 +1,91 @@
+{
+  "schemaVersion": "1.0.0",
+  "model": {
+    "id": "cecilia",
+    "displayName": "Cecilia",
+    "handle": "@cecilia",
+    "memberNumber": "001",
+    "sinceYear": 2026,
+    "status": "online"
+  },
+  "authorization": {
+    "viewerMode": "owner",
+    "grantId": "grant_cecilia_owner",
+    "scopes": ["card:read", "identity:read", "now:read", "rewind:read", "evidence:read", "reports:read", "model:search", "model:ask", "model:correct", "connectors:read", "connectors:connect"],
+    "expiresAt": null
+  },
+  "card": {
+    "monthYear": "AUGUST / 2026",
+    "tagline": "Building a model of myself",
+    "publicUrl": "pm.app/cecilia",
+    "material": "graphite",
+    "glyph": [true,false,true,false,true,false,true,true,true,false,true,true,false,true,true,false,true,true,true,false,true,false,true,false,true]
+  },
+  "personalModel": {
+    "memoryCount": 3266,
+    "root": "持续构建一份由用户拥有、能够被不同 Agent 调用的 Personal Model。",
+    "updatedAt": "2026-08-07T08:00:00+08:00",
+    "faces": [
+      {
+        "id": "face_cecilia_01",
+        "text": "把本地优先、隐私和可追溯放在公开分发之前。",
+        "observations": 144,
+        "confidence": 0.95,
+        "evidenceRefs": ["cecilia:event:2026-08-07:01"]
+      },
+      {
+        "id": "face_cecilia_02",
+        "text": "倾向先通过真实原型验证产品感觉，再逐步补齐完整度。",
+        "observations": 135,
+        "confidence": 0.92,
+        "evidenceRefs": ["cecilia:event:2026-08-06:03"]
+      }
+    ]
+  },
+  "now": {
+    "items": [
+      {"id":"c-now-1","kind":"past","title":"Personal Card 的上一版","why":"回到一个差点被忘记的设计判断","when":"昨天","dayId":"2026-08-06"},
+      {"id":"c-now-2","kind":"present","title":"继续 Personal Card","why":"从刚才留下的上下文继续","when":"现在","dayId":"2026-08-07"},
+      {"id":"c-now-3","kind":"future","title":"把开发任务交给 Codex","why":"先冻结视觉，再替换数据层","when":"明天","dayId":"2026-08-08"}
+    ]
+  },
+  "time": {
+    "days": [
+      {
+        "id": "2026-08-07",
+        "title": "Thursday, August 7",
+        "portrait": "今天的你一直在删除不属于这件产品的东西。",
+        "letter": "你保护的不是简洁，而是这个产品最初让人想靠近的感觉。",
+        "events": [
+          {"id":"c-event-1","time":"00:07","title":"Personal Card · 实时内容","detail":"继续整理 Personal Card、Swipe 和 Agent Report。","app":"Codex","evidenceRef":"cecilia:event:2026-08-07:01"}
+        ]
+      }
+    ]
+  },
+  "identity": {
+    "description": "Product person building Who Am I — a Personal Model that can be carried across agents.",
+    "dailyLine": "今天的你在保护产品的感觉，而不是增加功能。",
+    "weeklyLetter": ["这一周，你反复回到同一个问题：怎样让技术仍然像一个人的东西。","你删掉了很多正确但不属于它的功能。","这比增加一个新入口更接近产品本身。"]
+  },
+  "connectors": [
+    {"id":"claude-code","name":"Claude","product":"Claude Code","status":"connected","sessionId":"cs_cecilia_claude"},
+    {"id":"codex","name":"GPT","product":"Codex","status":"connected","sessionId":"cs_cecilia_codex"}
+  ],
+  "reports": [
+    {
+      "id":"report_cecilia_codex_01",
+      "modelId":"cecilia",
+      "connectorId":"codex",
+      "title":"继续 Personal Card · Context",
+      "summary":"GPT 已把本次读取整理成一页可以继续使用的上下文。",
+      "updatedAt":"2026-08-07T08:00:00+08:00",
+      "readCount":1,
+      "evidenceCount":2,
+      "sections":[
+        {"kind":"lead","title":"这页在说什么","body":"围绕 Personal Card，GPT 把当前上下文、相关记忆与长期理解收进了同一页。"},
+        {"kind":"understanding","title":"当前理解","body":"这不是一次孤立的 UI 修改，而是在继续校准本地、可观察、持续生长的产品表达。"}
+      ],
+      "evidenceRefs":["cecilia:face:01","cecilia:event:2026-08-07:01"]
+    }
+  ]
+}
