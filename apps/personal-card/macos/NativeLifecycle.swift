@@ -527,7 +527,7 @@ final class NativeLifecycleController: ObservableObject {
             throw NativeLifecycleError.unsafeUninstall("App 缺少生命周期工具。")
         }
         let helper = resources.appendingPathComponent("native-lifecycle-helper.sh")
-        try requireRegularFile(helper, executable: true)
+        try requireRegularFile(helper, executable: false)
         let appPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Applications/Who Am I.app").path
         return try await runProcess(

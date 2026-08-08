@@ -67,6 +67,7 @@ test("production installs a native SwiftUI app with an embedded backend", async 
   assert.match(packageBuilder, /Who Am I\.app/);
   assert.match(packageBuilder, /Contents\/Resources\/product/);
   assert.match(packageBuilder, /backend_embedded_in_app/);
+  assert.match(packageBuilder, /codesign --remove-signature/);
 });
 
 test("native app preserves the original V5 interaction surfaces without a WebView", async () => {

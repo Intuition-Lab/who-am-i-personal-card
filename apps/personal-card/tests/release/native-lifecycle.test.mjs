@@ -80,6 +80,11 @@ test("native lifecycle source keeps install, update and destructive boundaries e
   assert.match(appDelegate, /NativeMaintenanceView/);
   assert.match(launcher, /NativeLifecycle\.swift/);
   assert.match(launcher, /native-lifecycle-helper\.sh/);
+  assert.match(launcher, /\/usr\/bin\/install -m 0644[\s\S]*native-lifecycle-helper\.sh/);
+  assert.match(
+    swift,
+    /native-lifecycle-helper\.sh"\)[\s\S]*requireRegularFile\(helper, executable: false\)/,
+  );
 });
 
 test(

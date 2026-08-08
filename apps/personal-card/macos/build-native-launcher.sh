@@ -196,7 +196,7 @@ done
   "${TEMPORARY_ROOT}/WhoAmI-x86_64" \
   -output "${MACOS_DIRECTORY}/WhoAmI"
 /bin/chmod 0755 "${MACOS_DIRECTORY}/WhoAmI"
-/usr/bin/install -m 0755 \
+/usr/bin/install -m 0644 \
   "${LIFECYCLE_HELPER_PATH}" \
   "${RESOURCES_DIRECTORY}/native-lifecycle-helper.sh"
 

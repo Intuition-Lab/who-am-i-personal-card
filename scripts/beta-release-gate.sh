@@ -178,7 +178,7 @@ swift_typecheck() {
 }
 
 native_launcher() {
-  local version output app
+  local version output app helper
   version="$(tr -d '[:space:]' < "${PRODUCT_ROOT}/VERSION")"
   output="${TEMPORARY_ROOT}/native-launcher"
   /bin/bash \
@@ -187,9 +187,15 @@ native_launcher() {
     --product-version "${version}" \
     --output-directory "${output}"
   app="${output}/Who Am I.app"
+  helper="${app}/Contents/Resources/native-lifecycle-helper.sh"
   /usr/bin/codesign --verify --strict "${app}"
   /usr/bin/lipo "${app}/Contents/MacOS/WhoAmI" \
     -verify_arch arm64 x86_64
+  if [[ ! -f "${helper}" || -L "${helper}" || -x "${helper}" ]]; then
+    printf '%s\n' \
+      'Native lifecycle helper must be a non-executable signed App resource.' >&2
+    return 1
+  fi
   [[ "$(/usr/bin/plutil -extract WhoAmIBootstrapInstall raw -o - \
     "${app}/Contents/Info.plist")" == "true" ]]
 }
