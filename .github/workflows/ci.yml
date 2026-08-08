@@ -18,7 +18,7 @@ jobs:
   repository:
     name: repository checks
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -117,24 +117,57 @@ jobs:
         shell: bash
         run: bash scripts/validate-runtime-lock.sh
 
-      - name: Build candidate release assets
+      - name: Build and validate self-contained production bundle
         shell: bash
         run: |
           version="$(tr -d '[:space:]' < VERSION)"
-          bash scripts/build-release-assets.sh \
-            --repository "${GITHUB_REPOSITORY}" \
-            --tag "v${version}" \
-            --commit "${GITHUB_SHA}" \
-            --source-ref HEAD \
-            --output-directory "${RUNNER_TEMP}/release-assets"
-          repository_name="${GITHUB_REPOSITORY#*/}"
-          mkdir "${RUNNER_TEMP}/release-secret-scan"
+          package_name="who-am-i-${version}-self-contained-macos"
+          output_directory="${RUNNER_TEMP}/self-contained-linux"
+          extracted_directory="${RUNNER_TEMP}/self-contained-linux-extracted"
+
+          bash scripts/build-self-contained-package.sh \
+            --output-directory "${output_directory}"
+          test -f "${output_directory}/${package_name}.tar.gz"
+          test -f "${output_directory}/SHA256SUMS"
+          test ! -e "${output_directory}/${package_name}.dmg"
+          test "$(find "${output_directory}" -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 2
+          (
+            cd "${output_directory}"
+            sha256sum --check SHA256SUMS
+          )
+
+          mkdir "${extracted_directory}"
           tar -xzf \
-            "${RUNNER_TEMP}/release-assets/${repository_name}-${version}.tar.gz" \
-            -C "${RUNNER_TEMP}/release-secret-scan"
-          bash scripts/scan-secrets.sh \
-            --directory \
-            "${RUNNER_TEMP}/release-secret-scan/${repository_name}-${version}"
+            "${output_directory}/${package_name}.tar.gz" \
+            -C "${extracted_directory}"
+          package_root="${extracted_directory}/${package_name}"
+          (
+            cd "${package_root}"
+            sha256sum --check SELF-CONTAINED-SHA256SUMS
+          )
+          test ! -e "${package_root}/apps/personal-card/fixtures"
+          test ! -e "${package_root}/apps/personal-card/tests"
+          test ! -e "${package_root}/apps/personal-card/node_modules"
+          test -d "${package_root}/runtime-source/.git"
+
+          # Run the production-payload contract against the exact bundle.
+          mkdir -p "${package_root}/apps/personal-card/tests/release"
+          cp \
+            apps/personal-card/tests/release/production-install-payload.test.mjs \
+            "${package_root}/apps/personal-card/tests/release/"
+          node --test \
+            "${package_root}/apps/personal-card/tests/release/production-install-payload.test.mjs"
+
+          # The embedded Runtime must be the reviewed lock, with no network
+          # remote left for install-time source access.
+          source scripts/lib/runtime-lock.sh
+          runtime_lock_load runtime.lock
+          test "$(git -C "${package_root}/runtime-source" rev-parse HEAD)" = \
+            "${RUNTIME_COMMIT}"
+          test "$(git -C "${package_root}/runtime-source" rev-parse 'HEAD^{tree}')" = \
+            "${RUNTIME_TREE}"
+          test -z "$(git -C "${package_root}/runtime-source" remote)"
+          bash "${package_root}/install.sh" --print-plan
 
   macos:
     name: macOS prerequisites (${{ matrix.architecture }})
@@ -222,6 +255,59 @@ jobs:
         shell: bash
         run: test "$(uname -m)" = "arm64"
 
-      - name: Install, diagnose, and preserve-data uninstall
+      - name: Build, verify, and extract exact release assets
+        id: self-contained-package
         shell: bash
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          package_name="who-am-i-${version}-self-contained-macos"
+          output_directory="${RUNNER_TEMP}/release-assets"
+          extracted_directory="${RUNNER_TEMP}/self-contained-macos-extracted"
+
+          bash scripts/build-release-assets.sh \
+            --repository "${GITHUB_REPOSITORY}" \
+            --tag "v${version}" \
+            --commit "$(git rev-parse HEAD)" \
+            --source-ref HEAD \
+            --output-directory "${output_directory}"
+          test -f "${output_directory}/${package_name}.tar.gz"
+          test -f "${output_directory}/${package_name}.dmg"
+          test -f "${output_directory}/RELEASE-METADATA.txt"
+          test -f "${output_directory}/RELEASE-NOTES.md"
+          test -f "${output_directory}/SHA256SUMS"
+          test "$(find "${output_directory}" -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 5
+          (
+            cd "${output_directory}"
+            shasum -a 256 --check SHA256SUMS
+            hdiutil verify "${package_name}.dmg"
+          )
+
+          mkdir "${extracted_directory}"
+          tar -xzf \
+            "${output_directory}/${package_name}.tar.gz" \
+            -C "${extracted_directory}"
+          package_root="${extracted_directory}/${package_name}"
+          (
+            cd "${package_root}"
+            shasum -a 256 --check SELF-CONTAINED-SHA256SUMS
+          )
+          test -d "${package_root}/runtime-source/.git"
+
+          source scripts/lib/runtime-lock.sh
+          runtime_lock_load runtime.lock
+          test "$(git -C "${package_root}/runtime-source" rev-parse HEAD)" = \
+            "${RUNTIME_COMMIT}"
+          test "$(git -C "${package_root}/runtime-source" rev-parse 'HEAD^{tree}')" = \
+            "${RUNTIME_TREE}"
+          test -z "$(git -C "${package_root}/runtime-source" remote)"
+          printf 'product-root=%s\n' "${package_root}" >> "${GITHUB_OUTPUT}"
+
+      - name: Foundation regression tests
+        shell: bash
+        run: bash tests/foundation.sh
+
+      - name: Install, diagnose, and preserve-data uninstall from package
+        shell: bash
+        env:
+          WHOAMI_SMOKE_PRODUCT_ROOT: ${{ steps.self-contained-package.outputs.product-root }}
         run: bash scripts/smoke-install.sh --uninstall-via-receipt

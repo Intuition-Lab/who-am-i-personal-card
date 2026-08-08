@@ -26,7 +26,7 @@ Usage:
 
 --check validates the explicit local pilot decision without contacting GitHub.
 --require-pilot-go additionally requires complete post-publication evidence and
-verifies the immutable GitHub Release, its exact four assets, checksums,
+verifies the immutable GitHub Release, its exact five assets, checksums,
 metadata, and GitHub release attestations. Passing this gate authorizes only
 the first five-user pilot, never the later 20- or 75-user waves.
 EOF
@@ -192,10 +192,12 @@ actual_assets="$(
     --jq '.assets[].name' \
     | LC_ALL=C sort
 )"
-repository_name="${REPOSITORY#*/}"
-bundle_name="${repository_name}-${version}.tar.gz"
+package_name="who-am-i-${version}-self-contained-macos"
+dmg_name="${package_name}.dmg"
+bundle_name="${package_name}.tar.gz"
 expected_assets="$(
   printf '%s\n' \
+    "${dmg_name}" \
     "${bundle_name}" \
     RELEASE-METADATA.txt \
     RELEASE-NOTES.md \
@@ -203,21 +205,23 @@ expected_assets="$(
     | LC_ALL=C sort
 )"
 [[ "${actual_assets}" == "${expected_assets}" ]] \
-  || fail "published release does not contain the exact four approved assets"
+  || fail "published release does not contain the exact five approved assets"
 
 TEMPORARY_ROOT="$(runtime_temporary_root_create "product-pilot-gate")"
 (
   cd "${TEMPORARY_ROOT}"
   gh release download "${tag}" \
     --repo "${REPOSITORY}" \
+    --pattern "${dmg_name}" \
     --pattern "${bundle_name}" \
     --pattern "RELEASE-METADATA.txt" \
     --pattern "RELEASE-NOTES.md" \
     --pattern "SHA256SUMS"
-  [[ "$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" == "4" ]]
+  [[ "$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" == "5" ]]
   gh release verify "${tag}" --repo "${REPOSITORY}"
   for asset_name in \
-    "${bundle_name}" RELEASE-METADATA.txt RELEASE-NOTES.md SHA256SUMS; do
+    "${dmg_name}" "${bundle_name}" \
+    RELEASE-METADATA.txt RELEASE-NOTES.md SHA256SUMS; do
     gh release verify-asset "${tag}" "${asset_name}" --repo "${REPOSITORY}"
   done
   /usr/bin/shasum -a 256 --check SHA256SUMS
@@ -227,6 +231,9 @@ TEMPORARY_ROOT="$(runtime_temporary_root_create "product-pilot-gate")"
   /usr/bin/grep -Fxq "version=${version}" RELEASE-METADATA.txt
   /usr/bin/grep -Fxq "release_status=GO" RELEASE-METADATA.txt
   /usr/bin/grep -Fxq "pilot_status=HOLD" RELEASE-METADATA.txt
+  /usr/bin/grep -Fxq "runtime_delivery=embedded" RELEASE-METADATA.txt
+  /usr/bin/grep -Fxq "dmg_asset=${dmg_name}" RELEASE-METADATA.txt
+  /usr/bin/grep -Fxq "tar_asset=${bundle_name}" RELEASE-METADATA.txt
 )
 
 printf 'Pilot invitation gate: GO for exactly 5 users\n'

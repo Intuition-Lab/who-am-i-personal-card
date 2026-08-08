@@ -160,7 +160,7 @@ Immediately stop new invitations when any of these occurs:
 
 - a P0 or unresolved P1;
 - release asset or checksum mismatch;
-- the installer fetches a Runtime commit different from `runtime.lock`;
+- the installer finds an embedded Runtime commit different from `runtime.lock`;
 - product or Runtime data is deleted or cannot be used after upgrade/rollback;
 - a token, credential or personal context appears in default diagnostics,
   analytics, a public issue or a release artifact;

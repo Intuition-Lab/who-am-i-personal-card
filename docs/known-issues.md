@@ -5,13 +5,16 @@ remain release or rollout gates where stated.
 
 ## Distribution
 
-- The terminal installer now builds and ad-hoc signs a universal native
-  `Who Am I.app`. There is still no Developer ID signature, notarization,
-  `.dmg`, or `.pkg`; the current distribution remains a GitHub source archive
-  plus a terminal installer.
-- The new GitHub organization, repository name, visibility, tester access and
-  exact download URL are not decided.
-- The product license and redistribution policy are not decided.
+- The self-contained Release includes a `.dmg` and equivalent `.tar.gz`; both
+  contain the pinned Personal Model source and never clone its separate
+  repository during installation. The installed `Who Am I.app` is ad-hoc
+  signed, not Developer ID signed or notarized, so macOS may require the tester
+  to confirm opening it.
+- Distribution uses the public
+  `Intuition-Lab/who-am-i-personal-card` repository. Tester access is staged by
+  the beta runbook and remains blocked until the release and pilot gates pass.
+- The product source is Apache-2.0; personal model data remains the user's
+  data. Required upstream notices are included in both package formats.
 
 ## Runtime version
 
@@ -38,10 +41,10 @@ remain release or rollout gates where stated.
 
 - The installer has completed an isolated non-interactive end-to-end run on an
   Apple Silicon Mac.
-- The exact generated release archive has completed the same lifecycle after
+- The exact generated self-contained package has completed the same lifecycle after
   checksum verification and extraction into a path containing spaces on Apple
   Silicon.
-- A fresh source install downloads a managed Python when needed and a large
+- A fresh installation downloads a managed Python when needed and a large
   locked dependency set, including the PaddlePaddle and OpenCV archives.
   Dependency preparation took between roughly two and seven minutes across
   observed Apple Silicon runs; tester network conditions can make it longer.
@@ -85,9 +88,8 @@ remain release or rollout gates where stated.
 - Product-app removal is not automated. Runtime preserve/delete commands do
   not remove `Who Am I.app`, the versioned Card/Node directory or
   `~/Library/Application Support/Who Am I`.
-- The final GitHub repository, visibility, source license, support route,
-  rollout owners and thresholds are not approved. `RELEASE_STATUS=HOLD` is
-  therefore intentional.
+- Release, incident and rollout owners and rollout thresholds are not yet
+  approved. `RELEASE_STATUS=HOLD` is therefore intentional.
 
 These are release gates, not silent assumptions. Track evidence in
 `release-checklist.md` and remove an item only when the corresponding supported

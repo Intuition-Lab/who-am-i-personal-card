@@ -15,12 +15,14 @@ TAG=""
 COMMIT=""
 SOURCE_REF="HEAD"
 OUTPUT_DIRECTORY=""
+RUNTIME_CHECKOUT=""
 
 usage() {
   cat <<'EOF'
 Usage: bash scripts/build-release-assets.sh options
 
-Build the exact four assets consumed by the GitHub Release workflow.
+Build the exact five self-contained assets consumed by the GitHub Release
+workflow.
 
 Required:
   --repository OWNER/REPOSITORY
@@ -29,11 +31,14 @@ Required:
   --output-directory PATH
 
 Optional:
-  --source-ref GIT_REF  Git commit/ref to archive (default: HEAD).
+  --source-ref GIT_REF  Git commit/ref to validate (default: HEAD).
+  --runtime-checkout PATH
+                        Reuse an already verified pinned Runtime checkout.
   -h, --help            Show this help.
 
 The output directory must not already exist. The source ref must resolve to the
-declared commit and match the tracked working tree.
+declared commit and match the tracked working tree. The Personal Model source
+is embedded at build time; release installation never contacts its repository.
 EOF
 }
 
@@ -77,6 +82,14 @@ while [[ $# -gt 0 ]]; do
         exit 2
       }
       OUTPUT_DIRECTORY="$2"
+      shift 2
+      ;;
+    --runtime-checkout)
+      [[ $# -ge 2 ]] || {
+        printf '%s\n' '--runtime-checkout requires a value.' >&2
+        exit 2
+      }
+      RUNTIME_CHECKOUT="$2"
       shift 2
       ;;
     -h|--help)
@@ -150,7 +163,6 @@ if [[ ! -f "${release_manifest}" || -L "${release_manifest}" ]]; then
   printf 'Release manifest is missing or unsafe.\n' >&2
   exit 1
 fi
-release_paths=()
 manifest_seen="|"
 manifest_line_number=0
 while IFS= read -r manifest_line || [[ -n "${manifest_line}" ]]; do
@@ -179,7 +191,7 @@ while IFS= read -r manifest_line || [[ -n "${manifest_line}" ]]; do
   manifest_seen="${manifest_seen}${release_path}|"
   if /usr/bin/git cat-file -e \
     "${source_commit}:${release_path}" 2>/dev/null; then
-    release_paths+=("${release_path}")
+    :
   elif [[ "${manifest_line}" != \?* ]]; then
     printf 'Required release manifest entry is missing: %s\n' \
       "${release_path}" >&2
@@ -224,7 +236,9 @@ if ! /usr/bin/git diff --quiet "${source_commit}" -- .; then
 fi
 
 repository_name="${REPOSITORY#*/}"
-bundle_name="${repository_name}-${version}.tar.gz"
+package_name="who-am-i-${version}-self-contained-macos"
+dmg_name="${package_name}.dmg"
+bundle_name="${package_name}.tar.gz"
 release_notes="docs/release-notes/${TAG}.md"
 if [[ ! -f "${release_notes}" || -L "${release_notes}" ]]; then
   printf 'Missing version-controlled release notes: %s\n' \
@@ -232,15 +246,40 @@ if [[ ! -f "${release_notes}" || -L "${release_notes}" ]]; then
   exit 1
 fi
 
+package_build_root="$(runtime_temporary_root_create 'product-release-assets')"
+cleanup() {
+  local cleanup_status=$?
+  runtime_temporary_root_remove \
+    "${package_build_root}" "product-release-assets" || true
+  return "${cleanup_status}"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+package_build_arguments=(
+  --output-directory "${package_build_root}/package"
+)
+if [[ -n "${RUNTIME_CHECKOUT}" ]]; then
+  package_build_arguments+=(--runtime-checkout "${RUNTIME_CHECKOUT}")
+fi
+bash scripts/build-self-contained-package.sh \
+  "${package_build_arguments[@]}"
+for package_asset in "${dmg_name}" "${bundle_name}"; do
+  if [[ ! -f "${package_build_root}/package/${package_asset}" \
+    || -L "${package_build_root}/package/${package_asset}" ]]; then
+    printf 'Self-contained builder did not produce required asset: %s\n' \
+      "${package_asset}" >&2
+    exit 1
+  fi
+done
+
 /bin/mkdir "${OUTPUT_DIRECTORY}"
-/usr/bin/git archive \
-  --format=tar \
-  --prefix="${repository_name}-${version}/" \
-  --output="${OUTPUT_DIRECTORY}/${repository_name}-${version}.tar" \
-  "${source_commit}" \
-  "${release_paths[@]}"
-/usr/bin/gzip -n -9 \
-  "${OUTPUT_DIRECTORY}/${repository_name}-${version}.tar"
+/bin/cp \
+  "${package_build_root}/package/${dmg_name}" \
+  "${package_build_root}/package/${bundle_name}" \
+  "${OUTPUT_DIRECTORY}/"
 
 runtime_lock_load runtime.lock
 {
@@ -252,8 +291,12 @@ runtime_lock_load runtime.lock
   printf 'pilot_status=%s\n' "$(/bin/cat PILOT_STATUS)"
   printf 'runtime_repository=%s\n' "${RUNTIME_REPOSITORY}"
   printf 'runtime_commit=%s\n' "${RUNTIME_COMMIT}"
+  printf 'runtime_tree=%s\n' "${RUNTIME_TREE}"
   printf 'runtime_project=%s\n' "${RUNTIME_PROJECT_NAME}"
   printf 'runtime_version=%s\n' "${RUNTIME_PROJECT_VERSION}"
+  printf 'runtime_delivery=embedded\n'
+  printf 'dmg_asset=%s\n' "${dmg_name}"
+  printf 'tar_asset=%s\n' "${bundle_name}"
 } > "${OUTPUT_DIRECTORY}/RELEASE-METADATA.txt"
 /bin/cp "${release_notes}" "${OUTPUT_DIRECTORY}/RELEASE-NOTES.md"
 
@@ -261,14 +304,19 @@ cat >> "${OUTPUT_DIRECTORY}/RELEASE-NOTES.md" <<EOF
 
 ## Exact release assets
 
-This release contains exactly these four assets:
+This release contains exactly these five assets:
 
+- \`${dmg_name}\`
 - \`${bundle_name}\`
 - \`RELEASE-METADATA.txt\`
 - \`RELEASE-NOTES.md\`
 - \`SHA256SUMS\`
 
 ### Install from a public repository
+
+For the normal macOS flow, verify \`${dmg_name}\` against \`SHA256SUMS\`, open
+the DMG, and double-click \`Install Who Am I.command\`. The equivalent command
+line flow is:
 
 \`\`\`bash
 (
@@ -277,6 +325,10 @@ This release contains exactly these four assets:
     mktemp -d "\${TMPDIR:-/tmp}/${repository_name}-${version}-download.XXXXXX"
   )"
   cd "\${download_directory}"
+  curl --proto '=https' --tlsv1.2 --fail \
+    --retry 3 --retry-delay 2 --retry-all-errors \
+    --location --remote-name \
+    "https://github.com/${REPOSITORY}/releases/download/${TAG}/${dmg_name}"
   curl --proto '=https' --tlsv1.2 --fail \
     --retry 3 --retry-delay 2 --retry-all-errors \
     --location --remote-name \
@@ -293,10 +345,10 @@ This release contains exactly these four assets:
     --retry 3 --retry-delay 2 --retry-all-errors \
     --location --remote-name \
     "https://github.com/${REPOSITORY}/releases/download/${TAG}/SHA256SUMS"
-  test "\$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 4
+  test "\$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 5
   shasum -a 256 --check SHA256SUMS
   tar -xzf "${bundle_name}"
-  cd "${repository_name}-${version}"
+  cd "${package_name}"
   bash install.sh --interactive
 )
 \`\`\`
@@ -315,12 +367,15 @@ Install and authenticate the GitHub CLI first, then run:
   cd "\${download_directory}"
   gh release download "${TAG}" \
     --repo "${REPOSITORY}" \
+    --pattern "${dmg_name}" \
     --pattern "${bundle_name}" \
     --pattern "RELEASE-METADATA.txt" \
     --pattern "RELEASE-NOTES.md" \
     --pattern "SHA256SUMS"
-  test "\$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 4
+  test "\$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 5
   gh release verify "${TAG}" \
+    --repo "${REPOSITORY}"
+  gh release verify-asset "${TAG}" "${dmg_name}" \
     --repo "${REPOSITORY}"
   gh release verify-asset "${TAG}" "${bundle_name}" \
     --repo "${REPOSITORY}"
@@ -332,7 +387,7 @@ Install and authenticate the GitHub CLI first, then run:
     --repo "${REPOSITORY}"
   shasum -a 256 --check SHA256SUMS
   tar -xzf "${bundle_name}"
-  cd "${repository_name}-${version}"
+  cd "${package_name}"
   bash install.sh --interactive
 )
 \`\`\`
@@ -361,13 +416,14 @@ done
 (
   cd "${OUTPUT_DIRECTORY}"
   LC_ALL=C /usr/bin/shasum -a 256 \
+    "${dmg_name}" \
     "${bundle_name}" \
     RELEASE-METADATA.txt \
     RELEASE-NOTES.md \
     > SHA256SUMS
   /usr/bin/shasum -a 256 --check SHA256SUMS
-  [[ "$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 4 ]]
+  [[ "$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 5 ]]
 )
 
-printf 'Built four verified release assets in %s.\n' \
+printf 'Built five verified self-contained release assets in %s.\n' \
   "${OUTPUT_DIRECTORY}"

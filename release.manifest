@@ -1,6 +1,6 @@
-# Exact top-level entries included in the product Release source archive.
-# A leading ? marks a reviewed optional file. Add every future product code or
-# asset directory explicitly; unlisted repository content is never archived.
+# Reviewed top-level product source entries required before packaging.
+# A leading ? marks a reviewed optional file. Add future product code or asset
+# directories here and to the self-contained builder's explicit payload list.
 .agents
 .gitleaks.toml
 apps

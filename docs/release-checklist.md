@@ -58,7 +58,7 @@ gate; they cannot be filled with circular or predicted evidence.
       Evidence: ___
 - [ ] [RC-014] Product source license and repository visibility match the approved
       distribution policy. Evidence: ___
-- [ ] [RC-015] Dependency credentials are absent from source, history, release archive
+- [ ] [RC-015] Dependency credentials are absent from source, history, release packages
       and logs. Evidence: ___
 
 ## Repository checks
@@ -68,14 +68,17 @@ gate; they cannot be filled with circular or predicted evidence.
 - [ ] [RC-017] `bash tests/foundation.sh` passes on Apple Silicon and Intel macOS.
       Evidence: ___
 - [ ] [RC-018] `bash scripts/validate-runtime-lock.sh` passes. Evidence: ___
-- [ ] [RC-019] `bash install.sh --print-plan` prints the expected version, repository,
-      commit, project and data root. Evidence: ___
+- [ ] [RC-019] The packaged `bash install.sh --print-plan` prints the expected
+      version, embedded Runtime commit, project and data root, and confirms it
+      will not contact the separate Personal Model source repository. Evidence: ___
 - [ ] [RC-020] CI passes on the release commit and required checks cannot be bypassed by
       an unreviewed merge. Evidence: ___
-- [ ] [RC-021] A clean checkout builds the same named release artifact. Evidence: ___
-- [ ] [RC-022] `scripts/build-release-assets.sh` produces exactly four deterministic
-      assets, embeds the exact repository/tag commands, and includes only the
-      reviewed top-level entries in `release.manifest`. Evidence: ___
+- [ ] [RC-021] A clean checkout builds the same named self-contained DMG and
+      tar.gz release packages. Evidence: ___
+- [ ] [RC-022] `scripts/build-release-assets.sh` produces exactly five verified
+      assets (self-contained DMG, equivalent tar.gz, metadata, notes and
+      checksums), embeds the exact repository/tag commands, and packages only
+      the reviewed production payload plus pinned Runtime. Evidence: ___
 
 ## GitHub repository controls
 
@@ -96,7 +99,7 @@ gate; they cannot be filled with circular or predicted evidence.
       workflow's API gate reports `enabled=true`; a `404` is a release failure.
       Evidence: ___
 - [ ] [RC-028] **Post-publication:** The published release reports
-      `isImmutable=true`, contains exactly four assets, and `gh release verify`
+      `isImmutable=true`, contains exactly five assets, and `gh release verify`
       / `gh release verify-asset` validate its GitHub release attestations.
       Evidence: ___
 - [ ] [RC-029] **Workflow gate:** The tag commit is reachable from the protected
@@ -117,11 +120,12 @@ Configuration references:
       published command. Evidence: ___
 - [ ] [RC-032] macOS 13 minimum-version acceptance and older-version rejection are
       verified. Evidence: ___
-- [ ] [RC-033] A checkout/install path containing spaces is verified. Evidence: ___
+- [ ] [RC-033] A mounted DMG and extracted package path containing spaces are
+      verified. Evidence: ___
 - [ ] [RC-034] Xcode Command Line Tools missing/install/remediation behavior is
       verified. Evidence: ___
 - [ ] [RC-035] A non-interactive request against an existing Runtime is rejected before
-      source download or updater execution and preserves Runtime data,
+      Runtime replacement or updater execution and preserves Runtime data,
       encryption material, credentials, receipts, and its owner-only dependency
       cache. Evidence: ___
 - [ ] [RC-036] An interactive same-release reinstall and next-release update are
@@ -199,7 +203,8 @@ product intake; one missing workflow keeps the aggregate item unchecked.
 
 ## Artifact and GitHub release
 
-- [ ] [RC-061] Release archive contains only intended distributable files. Evidence: ___
+- [ ] [RC-061] Both self-contained release packages contain only the intended
+      production product, pinned Runtime and required notices. Evidence: ___
 - [ ] [RC-062] **Post-publication:** Published SHA-256 verifies against the
       downloaded artifact. Evidence: ___
 - [ ] [RC-063] **Workflow gate:** Apple Silicon and Intel jobs download, verify,
@@ -218,8 +223,9 @@ product intake; one missing workflow keeps the aggregate item unchecked.
       reachable from the release. Evidence: ___
 - [ ] [RC-069] Repository visibility and 100-tester access match the distribution
       decision. Evidence: ___
-- [ ] [RC-070] If an app/package is promised, its signing, notarization and clean-Mac
-      Gatekeeper checks pass. Evidence, or mark not applicable with reason: ___
+- [ ] [RC-070] The published signing/notarization status matches the explicit
+      beta decision, and clean-Mac Gatekeeper behavior and tester disclosure
+      are verified for both package formats. Evidence: ___
 
 ## Operations and go/no-go
 

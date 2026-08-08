@@ -11,23 +11,23 @@ local model.
 Cecilia and Lin exist only as explicit development fixtures and are never
 registered by a production launch.
 
-The source candidate includes a native macOS app window, the unchanged Card
-UI, a pinned private Node.js runtime, the reproducible Persome Runtime
-installer, verification and support tooling, and an optional Codex plugin that
-recalls relevant Personal Model context on every turn.
+The release candidate includes a native macOS app window, the unchanged Card
+UI, a pinned private Node.js runtime, the complete reviewed Persome Runtime
+source, and verification and support tooling. The optional Codex plugin in
+this repository can recall relevant Personal Model context on every turn.
 
 `RELEASE_STATUS` is currently `HOLD`. Tagging this candidate cannot publish a
 GitHub Release until a release owner records a reviewed `GO` decision.
-There is currently no Who Am I GitHub Release or release tag; the tested source
-install below is the only public installation path. The immutable-release
-command is documented for the later approved release and will return `404`
-until that release exists.
+There is currently no approved Who Am I GitHub Release or release tag. The
+download names and installation flow below describe the candidate that will be
+published after that gate; the URLs return `404` until the immutable release
+exists. Installing from a clone or floating branch is not supported.
 
-The backend is already public at
-[Intuition-Lab/personal-model](https://github.com/Intuition-Lab/personal-model).
-It is a local Runtime rather than a hosted cloud API. During a fresh install,
-Who Am I anonymously fetches and verifies the exact public commit in
+The backend is a local Runtime rather than a hosted cloud API. The
+self-contained package embeds and verifies the exact source commit in
 `runtime.lock`, then installs it under the signed-in user's `~/.persome`.
+Installation never clones or downloads the separate Personal Model source
+repository.
 Production communicates with that local Runtime over stdio, so one person's
 model database is never bundled into another person's download.
 
@@ -52,23 +52,43 @@ model database is never bundled into another person's download.
 - The Runtime installer does not modify Claude, Codex, Cursor, or other MCP
   client configurations. The Codex plugin is a separate, explicit install.
 
-## Install the current tested source candidate
+## Install the immutable self-contained release
 
-The following command installs the exact public source revision that passed
-the repository CI and isolated Apple Silicon installation test:
+After the reviewed release is published, download
+`who-am-i-0.1.0-beta.5-self-contained-macos.dmg` and `SHA256SUMS` from the
+same GitHub Release. Verify the checksum, open the DMG, and double-click
+`Install Who Am I.command`. The installer verifies the complete package again
+before it changes the Mac.
+
+The command-line `.tar.gz` is the equivalent fallback for users who cannot use
+the DMG:
 
 ```bash
 (
   set -euo pipefail
-  SOURCE_COMMIT="e909d93c4e5b85744e3e06af70006d5eb7b2fa05"
-  CHECKOUT_DIRECTORY="$(
-    mktemp -d "${TMPDIR:-/tmp}/who-am-i-personal-card.XXXXXX"
+  REPOSITORY="Intuition-Lab/who-am-i-personal-card"
+  VERSION="0.1.0-beta.5"
+  PACKAGE="who-am-i-${VERSION}-self-contained-macos"
+  RELEASE_BASE="https://github.com/${REPOSITORY}/releases/download/v${VERSION}"
+  DOWNLOAD_DIRECTORY="$(
+    mktemp -d "${TMPDIR:-/tmp}/${PACKAGE}-download.XXXXXX"
   )"
-  git clone \
-    https://github.com/Intuition-Lab/who-am-i-personal-card.git \
-    "${CHECKOUT_DIRECTORY}"
-  cd "${CHECKOUT_DIRECTORY}"
-  git checkout --detach "${SOURCE_COMMIT}"
+
+  cd "${DOWNLOAD_DIRECTORY}"
+  for asset in \
+    "${PACKAGE}.dmg" \
+    "${PACKAGE}.tar.gz" \
+    RELEASE-METADATA.txt \
+    RELEASE-NOTES.md \
+    SHA256SUMS; do
+    curl --proto '=https' --tlsv1.2 --fail \
+      --retry 3 --retry-delay 2 --retry-all-errors \
+      --location --remote-name "${RELEASE_BASE}/${asset}"
+  done
+  test "$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 5
+  shasum -a 256 --check SHA256SUMS
+  tar -xzf "${PACKAGE}.tar.gz"
+  cd "${PACKAGE}"
   bash install.sh --interactive
 )
 ```
@@ -82,44 +102,6 @@ available; otherwise the macOS account name becomes the initial local Card
 identity. A Mac without an initialized Personal Model keeps the existing
 profile and permission flow. Production never registers the Cecilia or Lin
 development fixtures.
-
-## Install an immutable release after `RELEASE_STATUS=GO`
-
-```bash
-(
-  set -euo pipefail
-  REPOSITORY="Intuition-Lab/who-am-i-personal-card"
-  VERSION="0.1.0-beta.5"
-  REPOSITORY_NAME="${REPOSITORY##*/}"
-  RELEASE_BASE="https://github.com/${REPOSITORY}/releases/download/v${VERSION}"
-  DOWNLOAD_DIRECTORY="$(
-    mktemp -d "${TMPDIR:-/tmp}/${REPOSITORY_NAME}-${VERSION}-download.XXXXXX"
-  )"
-
-  cd "${DOWNLOAD_DIRECTORY}"
-  curl --proto '=https' --tlsv1.2 --fail \
-    --retry 3 --retry-delay 2 --retry-all-errors \
-    --location --remote-name \
-    "${RELEASE_BASE}/${REPOSITORY_NAME}-${VERSION}.tar.gz"
-  curl --proto '=https' --tlsv1.2 --fail \
-    --retry 3 --retry-delay 2 --retry-all-errors \
-    --location --remote-name \
-    "${RELEASE_BASE}/RELEASE-METADATA.txt"
-  curl --proto '=https' --tlsv1.2 --fail \
-    --retry 3 --retry-delay 2 --retry-all-errors \
-    --location --remote-name \
-    "${RELEASE_BASE}/RELEASE-NOTES.md"
-  curl --proto '=https' --tlsv1.2 --fail \
-    --retry 3 --retry-delay 2 --retry-all-errors \
-    --location --remote-name \
-    "${RELEASE_BASE}/SHA256SUMS"
-  test "$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 4
-  shasum -a 256 --check SHA256SUMS
-  tar -xzf "${REPOSITORY_NAME}-${VERSION}.tar.gz"
-  cd "${REPOSITORY_NAME}-${VERSION}"
-  bash install.sh --interactive
-)
-```
 
 The subshell exits on the first failed download or verification and uses a new
 directory on every attempt, so stale files cannot carry a failed attempt into
@@ -182,9 +164,9 @@ bash "${MANAGEMENT_ROOT}/scripts/verify.sh" --full
 
 ## Enable automatic Personal Model context in Codex
 
-The release also contains the `personal-model-context` plugin. After installing
-the Runtime, add the immutable product repository as a Codex marketplace and
-install the plugin:
+The immutable Git tag also contains the optional `personal-model-context`
+plugin. It is not installed by the macOS package. After installing the Runtime,
+add the tagged product repository as a Codex marketplace and install it:
 
 ```bash
 codex plugin marketplace add \
@@ -212,7 +194,8 @@ and may therefore be processed and retained according to that Codex account's
 data controls. Installing and trusting the plugin is the explicit consent
 boundary; disable or remove it to stop automatic injection.
 
-Update from a newly downloaded immutable product release:
+Download and verify the newer self-contained release, extract its `.tar.gz`,
+then update interactively from that directory:
 
 ```bash
 bash update.sh --interactive
@@ -280,16 +263,17 @@ bash scripts/validate-runtime-lock.sh
 | `apps/personal-card/` | Existing V5 UI, local server, Provider/auth/store/setup layers and tests |
 | `.agents/plugins/marketplace.json` | GitHub-installable Intuition Lab Codex plugin catalog |
 | `plugins/personal-model-context/` | Automatic, read-only per-turn Personal Model recall for Codex |
-| `release.manifest` | Explicit top-level allowlist for the source Release archive |
+| `release.manifest` | Explicit top-level allowlist used when validating release source |
 | `RELEASE_STATUS` | Machine-enforced `HOLD`/`GO` publication decision |
 | `PILOT_STATUS` | Separate `HOLD`/`GO` decision for exactly the first five testers |
-| `install.sh` | Supported macOS source installation entry point |
+| `install.sh` | Verified installer embedded in the self-contained package |
 | `update.sh` | Reinstall through the current product tag's immutable Runtime lock |
 | `uninstall-runtime.sh` | Explicit Runtime removal with preserve/delete separation |
 | `scripts/verify.sh` | Quick and full installed-Runtime checks |
 | `scripts/verify-product.sh` | Installed Card, private Node and app-launcher integrity check |
 | `scripts/diagnose.sh` | Privacy-safe human/JSON support diagnostic |
-| `scripts/build-release-assets.sh` | Deterministic four-asset Release builder |
+| `scripts/build-self-contained-package.sh` | Build the embedded Runtime DMG and tar.gz |
+| `scripts/build-release-assets.sh` | Build the exact five verified GitHub Release assets |
 | `scripts/bootstrap-github-repository.sh` | Fail-closed initial commit, new-repository and first-push bootstrap |
 | `scripts/github-repository-controls.sh` | Plan, apply, and verify GitHub release controls |
 | `scripts/release-readiness.sh` | Reject publication unless the decision is `GO` |
