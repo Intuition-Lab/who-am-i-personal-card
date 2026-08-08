@@ -8,21 +8,14 @@ const appRoot = fileURLToPath(new URL("../../", import.meta.url));
 const productRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 
 test("production installs a native SwiftUI app with an embedded backend", async () => {
-  const [
-    installer,
-    swiftSource,
-    nativeUI,
-    buildScript,
-    packageBuilder,
-    signingScript,
-    notarizeScript,
-    entitlements,
-  ] = await Promise.all([
+  const [installer, swiftSource, nativeUI, buildScript, packageBuilder] = await Promise.all([
     readFile(path.join(productRoot, "install.sh"), "utf8"),
     readFile(path.join(appRoot, "macos/WhoAmIApp.swift"), "utf8"),
     readFile(path.join(appRoot, "macos/WhoAmINativeUI.swift"), "utf8"),
     readFile(path.join(appRoot, "macos/build-native-launcher.sh"), "utf8"),
     readFile(path.join(productRoot, "scripts/build-self-contained-package.sh"), "utf8"),
+  ]);
+  const [signingScript, notarizeScript, entitlements] = await Promise.all([
     readFile(path.join(productRoot, "scripts/sign-macos-release.sh"), "utf8"),
     readFile(path.join(productRoot, "scripts/notarize-macos-release.sh"), "utf8"),
     readFile(path.join(appRoot, "macos/WhoAmI.entitlements"), "utf8"),
