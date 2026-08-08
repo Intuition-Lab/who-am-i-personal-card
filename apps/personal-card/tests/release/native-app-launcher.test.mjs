@@ -30,6 +30,16 @@ test("production installs a native SwiftUI app with an embedded backend", async 
   assert.match(nativeUI, /api\/model\/connectors/);
   assert.match(nativeUI, /api\/model\/evidence/);
   assert.match(nativeUI, /api\/model\/correct/);
+  assert.match(nativeUI, /enum NativeRequestPhase/);
+  assert.match(nativeUI, /case insufficient/);
+  assert.match(nativeUI, /Personal Model 推断/);
+  assert.match(nativeUI, /记录事实/);
+  assert.match(nativeUI, /生成内容/);
+  assert.match(nativeUI, /延续建议/);
+  assert.match(nativeUI, /复制卡片/);
+  assert.match(nativeUI, /这条 Evidence 已失效/);
+  assert.match(nativeUI, /本机服务未启动/);
+  assert.doesNotMatch(nativeUI, /Button\(copied \? "Copied" : "Share"\)/);
   assert.match(swiftSource, /applicationShouldTerminateAfterLastWindowClosed/);
   assert.match(swiftSource, /NSStatusBar\.system\.statusItem/);
   assert.match(swiftSource, /\.accessory/);
