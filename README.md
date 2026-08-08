@@ -11,6 +11,13 @@ local model.
 Cecilia and Lin exist only as explicit development fixtures and are never
 registered by a production launch.
 
+The public release page is
+[who-am-i-personal-model.ceciliaz11.chatgpt.site](https://who-am-i-personal-model.ceciliaz11.chatgpt.site).
+It reads this repository's GitHub Releases directly, so its download button
+automatically follows every newly published immutable package. While
+`RELEASE_STATUS=HOLD`, it correctly shows that the first download is still
+passing the release gate.
+
 The release candidate includes a native macOS app window, the unchanged Card
 UI, a pinned private Node.js runtime, the complete reviewed Persome Runtime
 source, and verification and support tooling. The optional Codex plugin in
