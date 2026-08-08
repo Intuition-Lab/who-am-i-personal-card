@@ -60,6 +60,14 @@ jobs:
           npm run test:production-browser
           npm run test:production-no-demo
 
+      - name: Build and test the live GitHub release website
+        working-directory: website
+        shell: bash
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm test
+          npm run lint
+
       - name: Lint shell scripts
         shell: bash
         run: |
