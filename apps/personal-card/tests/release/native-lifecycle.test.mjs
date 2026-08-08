@@ -82,7 +82,10 @@ test("native lifecycle source keeps install, update and destructive boundaries e
   assert.match(launcher, /native-lifecycle-helper\.sh/);
 });
 
-test("removing product code preserves Personal Model data and Card profile", async () => {
+test(
+  "removing product code preserves Personal Model data and Card profile",
+  { skip: process.platform !== "darwin" },
+  async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "whoami-lifecycle-remove-"));
   try {
     const fixture = await makeManagedFixture(root);
@@ -109,9 +112,13 @@ test("removing product code preserves Personal Model data and Card profile", asy
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+  },
+);
 
-test("permanent deletion preparation refuses an independently managed Runtime", async () => {
+test(
+  "permanent deletion preparation refuses an independently managed Runtime",
+  { skip: process.platform !== "darwin" },
+  async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "whoami-lifecycle-external-"));
   try {
     const fixture = await makeManagedFixture(root);
@@ -130,9 +137,13 @@ test("permanent deletion preparation refuses an independently managed Runtime", 
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+  },
+);
 
-test("managed permanent deletion still requires the Runtime DELETE prompt", async () => {
+test(
+  "managed permanent deletion still requires the Runtime DELETE prompt",
+  { skip: process.platform !== "darwin" },
+  async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "whoami-lifecycle-delete-"));
   try {
     const fixture = await makeManagedFixture(root);
@@ -163,4 +174,5 @@ test("managed permanent deletion still requires the Runtime DELETE prompt", asyn
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+  },
+);

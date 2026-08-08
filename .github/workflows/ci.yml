@@ -178,6 +178,10 @@ jobs:
         shell: bash
         run: bash tests/foundation.sh
 
+      - name: Test native lifecycle boundaries
+        shell: bash
+        run: node --test apps/personal-card/tests/release/native-lifecycle.test.mjs
+
       - name: Verify host prerequisites
         shell: bash
         run: bash install.sh --check
