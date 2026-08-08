@@ -12,6 +12,11 @@ source "${PRODUCT_ROOT}/scripts/lib/runtime-lock.sh"
 
 OUTPUT_DIRECTORY=""
 RUNTIME_CHECKOUT=""
+RELEASE_SIGNING=0
+SIGN_IDENTITY=""
+TEAM_ID=""
+NOTARY_KEYCHAIN_PROFILE=""
+SIGNING_KEYCHAIN=""
 
 usage() {
   cat <<'EOF'
@@ -26,7 +31,15 @@ Required:
 Optional:
   --runtime-checkout PATH  Reuse an already verified pinned Runtime checkout.
                            Without this option the builder fetches it now.
+  --release-signing        Require Developer ID signing and Apple notarization.
+  --sign-identity ID       Developer ID Application identity name.
+  --team-id TEAMID         Apple Developer Team ID.
+  --notary-profile NAME    notarytool profile already stored in Keychain.
+  --signing-keychain PATH  Explicit temporary signing/notary keychain.
   -h, --help               Show this help.
+
+Development builds default to ad-hoc signing. --release-signing fails closed
+unless every signing and notarization input is present and valid.
 EOF
 }
 
@@ -46,6 +59,42 @@ while [[ $# -gt 0 ]]; do
         exit 2
       }
       RUNTIME_CHECKOUT="$2"
+      shift 2
+      ;;
+    --release-signing)
+      RELEASE_SIGNING=1
+      shift
+      ;;
+    --sign-identity)
+      [[ $# -ge 2 ]] || {
+        printf '%s\n' '--sign-identity requires a value.' >&2
+        exit 2
+      }
+      SIGN_IDENTITY="$2"
+      shift 2
+      ;;
+    --team-id)
+      [[ $# -ge 2 ]] || {
+        printf '%s\n' '--team-id requires a value.' >&2
+        exit 2
+      }
+      TEAM_ID="$2"
+      shift 2
+      ;;
+    --notary-profile)
+      [[ $# -ge 2 ]] || {
+        printf '%s\n' '--notary-profile requires a value.' >&2
+        exit 2
+      }
+      NOTARY_KEYCHAIN_PROFILE="$2"
+      shift 2
+      ;;
+    --signing-keychain)
+      [[ $# -ge 2 ]] || {
+        printf '%s\n' '--signing-keychain requires a value.' >&2
+        exit 2
+      }
+      SIGNING_KEYCHAIN="$2"
       shift 2
       ;;
     -h|--help)
@@ -68,6 +117,36 @@ case "${OUTPUT_DIRECTORY}" in
 esac
 if [[ -e "${OUTPUT_DIRECTORY}" || -L "${OUTPUT_DIRECTORY}" ]]; then
   printf 'Output directory already exists: %s\n' "${OUTPUT_DIRECTORY}" >&2
+  exit 2
+fi
+if [[ "${RELEASE_SIGNING}" -eq 1 ]]; then
+  if [[ -z "${SIGN_IDENTITY}" || "${SIGN_IDENTITY}" == "-" \
+    || "${SIGN_IDENTITY}" != Developer\ ID\ Application:* ]]; then
+    printf '%s\n' \
+      'Release signing requires a Developer ID Application identity.' >&2
+    exit 2
+  fi
+  if [[ ! "${TEAM_ID}" =~ ^[A-Z0-9]{10}$ ]]; then
+    printf '%s\n' \
+      'Release signing requires a valid 10-character Apple Team ID.' >&2
+    exit 2
+  fi
+  case "${NOTARY_KEYCHAIN_PROFILE}" in
+    ""|-*|*[!A-Za-z0-9._-]*|*[[:cntrl:]]*)
+      printf '%s\n' \
+        'Release signing requires a safe notary Keychain profile name.' >&2
+      exit 2
+      ;;
+  esac
+  if [[ -n "${SIGNING_KEYCHAIN}" \
+    && ( ! -f "${SIGNING_KEYCHAIN}" || -L "${SIGNING_KEYCHAIN}" ) ]]; then
+    printf '%s\n' 'The explicit signing keychain is missing or unsafe.' >&2
+    exit 2
+  fi
+elif [[ -n "${SIGN_IDENTITY}" || -n "${TEAM_ID}" \
+  || -n "${NOTARY_KEYCHAIN_PROFILE}" || -n "${SIGNING_KEYCHAIN}" ]]; then
+  printf '%s\n' \
+    'Signing inputs require the explicit --release-signing mode.' >&2
   exit 2
 fi
 if [[ "$(/usr/bin/uname -s)" != "Darwin" ]]; then
@@ -327,6 +406,9 @@ native_app_included=${native_app_included}
 native_app_entrypoint=Who Am I.app
 backend_embedded_in_app=${native_app_included}
 embedded_product_path=Who Am I.app/Contents/Resources/product
+apple_signing=$([[ "${RELEASE_SIGNING}" -eq 1 ]] && printf 'developer-id' || printf 'ad-hoc')
+apple_team_id=$([[ "${RELEASE_SIGNING}" -eq 1 ]] && printf '%s' "${TEAM_ID}" || printf 'none')
+apple_notarization_target=$([[ "${RELEASE_SIGNING}" -eq 1 ]] && printf 'dmg' || printf 'none')
 EOF
 
 # A DMG preserves the builder's numeric owner. Release contents therefore
@@ -358,12 +440,28 @@ if [[ "${native_app_included}" == "true" ]]; then
     /usr/bin/shasum -a 256 --check SELF-CONTAINED-SHA256SUMS >/dev/null
   )
   /bin/chmod 0644 "${embedded_product_root}/SELF-CONTAINED-SHA256SUMS"
-  /usr/bin/codesign \
-    --force \
-    --sign - \
-    --timestamp=none \
-    "${stage_root}/Who Am I.app"
-  /usr/bin/codesign --verify --strict "${stage_root}/Who Am I.app"
+  if [[ "${RELEASE_SIGNING}" -eq 1 ]]; then
+    sign_app_arguments=(
+      --app "${stage_root}/Who Am I.app"
+      --sign-identity "${SIGN_IDENTITY}"
+      --team-id "${TEAM_ID}"
+      --entitlements \
+        "${PRODUCT_ROOT}/apps/personal-card/macos/WhoAmI.entitlements"
+    )
+    if [[ -n "${SIGNING_KEYCHAIN}" ]]; then
+      sign_app_arguments+=(--keychain "${SIGNING_KEYCHAIN}")
+    fi
+    /bin/bash "${PRODUCT_ROOT}/scripts/sign-macos-release.sh" \
+      "${sign_app_arguments[@]}"
+  else
+    /usr/bin/codesign \
+      --force \
+      --sign - \
+      --timestamp=none \
+      "${stage_root}/Who Am I.app"
+    /usr/bin/codesign --verify --deep --strict \
+      "${stage_root}/Who Am I.app"
+  fi
   /usr/bin/lipo \
     "${stage_root}/Who Am I.app/Contents/MacOS/WhoAmI" \
     -verify_arch arm64 x86_64
@@ -403,6 +501,32 @@ if [[ "$(/usr/bin/uname -s)" == "Darwin" && -x /usr/bin/hdiutil ]]; then
     -srcfolder "${stage_root}" \
     -format UDZO \
     "${OUTPUT_DIRECTORY}/${package_name}.dmg"
+fi
+
+if [[ "${RELEASE_SIGNING}" -eq 1 ]]; then
+  dmg_path="${OUTPUT_DIRECTORY}/${package_name}.dmg"
+  if [[ ! -f "${dmg_path}" || -L "${dmg_path}" ]]; then
+    printf '%s\n' 'Release signing requires a final DMG.' >&2
+    exit 1
+  fi
+  sign_dmg_arguments=(
+    --dmg "${dmg_path}"
+    --sign-identity "${SIGN_IDENTITY}"
+    --team-id "${TEAM_ID}"
+  )
+  notarize_arguments=(
+    --dmg "${dmg_path}"
+    --team-id "${TEAM_ID}"
+    --keychain-profile "${NOTARY_KEYCHAIN_PROFILE}"
+  )
+  if [[ -n "${SIGNING_KEYCHAIN}" ]]; then
+    sign_dmg_arguments+=(--keychain "${SIGNING_KEYCHAIN}")
+    notarize_arguments+=(--keychain "${SIGNING_KEYCHAIN}")
+  fi
+  /bin/bash "${PRODUCT_ROOT}/scripts/sign-macos-release.sh" \
+    "${sign_dmg_arguments[@]}"
+  /bin/bash "${PRODUCT_ROOT}/scripts/notarize-macos-release.sh" \
+    "${notarize_arguments[@]}"
 fi
 
 (
