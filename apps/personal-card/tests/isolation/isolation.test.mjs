@@ -152,7 +152,7 @@ test("expired Connector Sessions are rejected and revoked", () => {
   );
 });
 
-test("stable event hash includes modelId, connectorId, sessionId, and grantId", () => {
+test("stable event hash covers identity and every Report-visible event field", () => {
   const base = {
     modelId: "cecilia",
     connectorId: "codex",
@@ -165,6 +165,9 @@ test("stable event hash includes modelId, connectorId, sessionId, and grantId", 
     summary: "same event",
     occurredAt: NOW.toISOString(),
     durationMs: 12,
+    details: ["recorded result"],
+    interpretation: "recorded interpretation",
+    status: "ok",
   };
   const baseHash = stableConnectorEventHash(base);
 
@@ -173,6 +176,9 @@ test("stable event hash includes modelId, connectorId, sessionId, and grantId", 
     ["connectorId", "claude-code"],
     ["sessionId", "cs_cecilia_session_0002"],
     ["grantId", "grant_other"],
+    ["details", ["tampered result"]],
+    ["interpretation", "tampered interpretation"],
+    ["status", "error"],
   ]) {
     assert.notEqual(
       stableConnectorEventHash({ ...base, [field]: value }),

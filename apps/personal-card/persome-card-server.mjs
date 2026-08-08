@@ -1962,6 +1962,49 @@ async function connectModelConnector(req, res, url, connectorId) {
   });
 }
 
+async function disconnectModelConnector(req, res, url, connectorId) {
+  const body = await readJsonBody(req);
+  const context = modelContext(req, res, url, body, "connectors:connect");
+  const connectorMap = activeConnectorSessions.get(context.sessionId);
+  const connectorSessionId = connectorMap?.get(connectorId);
+  if (!connectorSessionId) {
+    const error = new Error("The Connector is not connected in this session.");
+    error.code = "CONNECTOR_SESSION_NOT_FOUND";
+    error.status = 404;
+    throw error;
+  }
+  const connectorSession = connectorSessionService.resolve(
+    connectorSessionId,
+    {
+      viewerSessionId: context.sessionId,
+      modelId: context.modelId,
+      connectorId,
+      requiredScope: "connectors:connect",
+    },
+  );
+  const event = await connectorEventStore.appendEvent(connectorSession, {
+    eventType: "connector/disconnected",
+    tool: "disconnectAgent",
+    summary: `${connectorId} disconnected from ${context.modelId}`,
+  });
+  connectorSessionService.revoke(connectorSessionId, "disconnected");
+  connectorMap.delete(connectorId);
+  if (connectorMap.size === 0) {
+    activeConnectorSessions.delete(context.sessionId);
+  }
+  sendJson(res, 200, {
+    ok: true,
+    modelId: context.modelId,
+    revision: context.revision,
+    connector: {
+      connectorId,
+      status: "available",
+      sessionId: connectorSessionId,
+    },
+    event,
+  });
+}
+
 async function serveModelReports(req, res, url) {
   const context = modelContext(req, res, url, undefined, "reports:read");
   const provider = providerRegistry.resolve(context.modelId);
@@ -2616,6 +2659,18 @@ const server = createServer(async (req, res) => {
       );
       if (req.method === "POST" && connectorMatch) {
         await connectModelConnector(req, res, url, connectorMatch[1]);
+        return;
+      }
+      const connectorDisconnectMatch = url.pathname.match(
+        /^\/api\/model\/connectors\/([A-Za-z0-9_-]+)\/disconnect$/,
+      );
+      if (req.method === "POST" && connectorDisconnectMatch) {
+        await disconnectModelConnector(
+          req,
+          res,
+          url,
+          connectorDisconnectMatch[1],
+        );
         return;
       }
       if (req.method === "GET" && url.pathname === "/api/model/reports") {
