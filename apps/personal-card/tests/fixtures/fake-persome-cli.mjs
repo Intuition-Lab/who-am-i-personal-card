@@ -32,6 +32,7 @@ const previousFace =
   `${persona.face} returns to the field before making a decision.`;
 const correctedFace = persona.correctedFace ||
   `${persona.face} now verifies authorization before making a decision.`;
+const rewindTimestamp = persona.rewindTimestamp || "2026-08-07T09:00";
 
 if (command === "--help") {
   process.stdout.write("fake persome\n");
@@ -76,7 +77,6 @@ const toolResults = {
     root: { signature: `${persona.root}. Builds calm tools from field evidence.` },
     faces: [
       {
-        id: "mira-face",
         signature: correctionApplied ? correctedFace : previousFace,
         observations: 7,
         confidence: 0.94,
@@ -88,7 +88,7 @@ const toolResults = {
       {
         id: persona.rewind,
         path: "event-2026-08-07.md",
-        timestamp: "2026-08-07T09:00:00+08:00",
+        timestamp: rewindTimestamp,
         content:
           `${persona.rewind} (09:00–09:40)\n\n${persona.rewind} reviewed a quiet navigation prototype in the field.\n\n- [09:00–09:40, Notes] ${persona.rewind} notes`,
       },
@@ -98,6 +98,26 @@ const toolResults = {
     recent_timeline_blocks: [],
   },
 };
+
+function modelSnapshotResult(args = {}) {
+  if (args.section !== "faces") return toolResults.get_model_snapshot;
+  return {
+    ...toolResults.get_model_snapshot,
+    section: "faces",
+    items: [
+      {
+        id: "mira-face",
+        signature: correctionApplied ? correctedFace : previousFace,
+        observations: 7,
+        confidence: 0.94,
+        status: "active",
+        member_receipts: ["⟨mem-01:user-mira.md⟩"],
+        source_receipts: ["⟨mem-01:user-mira.md⟩"],
+      },
+    ],
+    include_evidence_refs: args.include_evidence_refs === true,
+  };
+}
 
 function searchResult(args = {}) {
   if (
@@ -169,7 +189,7 @@ function resolveEvidenceResult(reference) {
       status: "historical",
       label: "Field prototype review",
       summary: `${persona.rewind} reviewed a quiet navigation prototype in the field.`,
-      timestamp: "2026-08-07T09:00:00+08:00",
+      timestamp: rewindTimestamp,
       path: reference,
       metadata: { source_kind: "entry", app_name: "Notes" },
       sources: [],
@@ -276,6 +296,8 @@ lines.on("line", (line) => {
         ? applyCorrection(args)
         : name === "resolve_evidence"
           ? resolveEvidenceResult(String(args.reference || ""))
+          : name === "get_model_snapshot"
+            ? modelSnapshotResult(args)
           : toolResults[name] || {};
     result = {
       structuredContent: {

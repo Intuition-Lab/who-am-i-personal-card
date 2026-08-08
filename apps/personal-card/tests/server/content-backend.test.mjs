@@ -150,6 +150,9 @@ test("local content backend provides semantic search, grounded ask, refusal, fal
   assert.equal(search.body.results[0].contentType, "observed");
   assert.equal(search.body.results[0].confidence, 0.94);
   assert.equal(search.body.results[0].method, "persome-mcp-search");
+  assert.equal(search.body.method, "persome-mcp-search");
+  assert.equal(search.body.degraded, false);
+  assert.equal(search.body.degradationReason, null);
   assert.ok(search.body.results.every((result) => result.modelId === modelId));
   assert.ok(search.body.results.every((result) =>
     result.evidenceRefs.every((reference) => reference.startsWith(`${modelId}:`))
@@ -228,6 +231,9 @@ test("local content backend provides semantic search, grounded ask, refusal, fal
   assert.ok(degraded.body.results.every(({ method }) =>
     method === "snapshot-keyword-search"
   ));
+  assert.equal(degraded.body.method, "snapshot-keyword-search");
+  assert.equal(degraded.body.degraded, true);
+  assert.match(degraded.body.degradationReason, /关键词匹配/u);
   assert.doesNotMatch(JSON.stringify(degraded.body), /private fake MCP/u);
 
   const correction = await post("/api/model/correct", {

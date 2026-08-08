@@ -57,6 +57,8 @@ const OBSERVABLE_MCP_NAME = "persome";
 const LEGACY_OBSERVABLE_MCP_NAME = "whoami-personal-model";
 const DEV_MODE = process.env.WHOAMI_DEV_MODE !== "0" && process.env.NODE_ENV !== "production";
 const TEST_MODE = process.env.WHOAMI_TEST_MODE === "1";
+const DEFAULT_PERSOME_TIMEOUT_MS = 20_000;
+const SEARCH_PERSOME_TIMEOUT_MS = 180_000;
 const GRANT_AUDIENCE = "personal-card-v5";
 const GRANT_SECRET = process.env.WHOAMI_GRANT_SECRET || randomBytes(48);
 const PERSOME_ROOT = process.env.PERSOME_ROOT || resolve(homedir(), ".persome");
@@ -428,25 +430,29 @@ class PersomeMcpClient {
   }
 
   callTool(name, args) {
-    return this.call("tools/call", { name, arguments: args });
+    return this.call(
+      "tools/call",
+      { name, arguments: args },
+      name === "search" ? SEARCH_PERSOME_TIMEOUT_MS : DEFAULT_PERSOME_TIMEOUT_MS,
+    );
   }
 
   async notify(method, params) {
     await this.post({ jsonrpc: "2.0", method, params });
   }
 
-  async call(method, params) {
+  async call(method, params, timeoutMs = DEFAULT_PERSOME_TIMEOUT_MS) {
     const message = await this.post({
       jsonrpc: "2.0",
       id: this.nextId++,
       method,
       params,
-    });
+    }, timeoutMs);
     if (message.error) throw new Error(message.error.message || `Persome 调用失败：${method}`);
     return message.result;
   }
 
-  async post(payload) {
+  async post(payload, timeoutMs = DEFAULT_PERSOME_TIMEOUT_MS) {
     const headers = {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
@@ -460,7 +466,7 @@ class PersomeMcpClient {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(12000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const sessionId = response.headers.get("mcp-session-id");
     if (sessionId) this.sessionId = sessionId;
@@ -535,7 +541,11 @@ class PersomeStdioClient {
   }
 
   callTool(name, args) {
-    return this.call("tools/call", { name, arguments: args });
+    return this.call(
+      "tools/call",
+      { name, arguments: args },
+      name === "search" ? SEARCH_PERSOME_TIMEOUT_MS : DEFAULT_PERSOME_TIMEOUT_MS,
+    );
   }
 
   notify(method, params) {
@@ -544,14 +554,14 @@ class PersomeStdioClient {
     return Promise.resolve();
   }
 
-  call(method, params) {
+  call(method, params, timeoutMs = DEFAULT_PERSOME_TIMEOUT_MS) {
     this.start();
     const id = this.nextId++;
     return new Promise((resolveCall, rejectCall) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         rejectCall(new Error(`Persome 调用超时：${method}`));
-      }, 20000);
+      }, timeoutMs);
       this.pending.set(id, { resolve: resolveCall, reject: rejectCall, timer });
       this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
     });
@@ -1508,9 +1518,11 @@ async function personalModelSetupStatus() {
   );
   let initialized = false;
   let buildStatus = "unavailable";
+  let hasUsableModel = false;
   if (DEV_MODE) {
     initialized = true;
     buildStatus = "development";
+    hasUsableModel = true;
   } else if (installed) {
     let client;
     try {
@@ -1523,9 +1535,19 @@ async function personalModelSetupStatus() {
       initialized = snapshot?.projection_schema_version === 1
         || snapshot?.schema_version === 1;
       buildStatus = String(snapshot?.build?.status || "not_built");
+      const modelStats = snapshot?.model_stats || {};
+      hasUsableModel = Boolean(
+        snapshot?.root?.id
+        || snapshot?.root?.signature
+        || (Array.isArray(snapshot?.faces) && snapshot.faces.length > 0)
+        || Number(modelStats.roots) > 0
+        || Number(modelStats.faces) > 0
+        || Number(modelStats.points) > 0,
+      );
     } catch {
       initialized = false;
       buildStatus = "unavailable";
+      hasUsableModel = false;
     } finally {
       client?.close();
     }
@@ -1550,6 +1572,7 @@ async function personalModelSetupStatus() {
       installed,
       initialized,
       buildStatus,
+      hasUsableModel,
       version: "0.3.2",
       connection: managed
         ? "product-managed"
@@ -1741,6 +1764,8 @@ async function searchActiveModel(req, res, url) {
   const sourceRefs = [...new Set(
     results.flatMap((result) => result.sourceRefs || result.evidenceRefs || []),
   )];
+  const method = results[0]?.method || "provider-search";
+  const degraded = method === "snapshot-keyword-search";
   sendJson(res, 200, {
     ok: true,
     modelId: context.modelId,
@@ -1756,7 +1781,11 @@ async function searchActiveModel(req, res, url) {
       until: searchOptions.until || null,
     },
     generatedAt: new Date().toISOString(),
-    method: results[0]?.method || "provider-search",
+    method,
+    degraded,
+    degradationReason: degraded
+      ? "实时语义搜索暂时不可用，当前结果来自已加载模型的关键词匹配。"
+      : null,
     sourceRefs,
   });
 }
@@ -2197,6 +2226,9 @@ async function resolveLocalEvidence(modelId, reference) {
       result.metadata?.occurred_at || result.timestamp || "",
     ).trim();
     const validTimestamp = Number.isFinite(Date.parse(timestamp));
+    const normalizedTimestamp = validTimestamp
+      ? new Date(timestamp).toISOString()
+      : null;
     if (
       kind === "unknown" ||
       status === "missing" ||
@@ -2205,8 +2237,12 @@ async function resolveLocalEvidence(modelId, reference) {
       return null;
     }
 
-    const rawKind = kind === "memory"
-      ? "persome-memory"
+    const isActivityMemory = kind === "memory"
+      && /^event-/u.test(String(result.path || ""));
+    const rawKind = isActivityMemory
+      ? "persome-activity"
+      : kind === "memory"
+        ? "persome-memory"
       : ["activity", "capture"].includes(kind) &&
           status !== "metadata_only"
         ? "persome-activity"
@@ -2238,7 +2274,7 @@ async function resolveLocalEvidence(modelId, reference) {
       reference,
       source: {
         type: sourceType,
-        originalTime: validTimestamp ? timestamp : null,
+        originalTime: normalizedTimestamp,
         application: String(
           result.metadata?.app_name ||
           result.metadata?.source_kind ||
@@ -2270,7 +2306,7 @@ async function resolveLocalEvidence(modelId, reference) {
       ...(result.canonical_reference
         ? { receipt: String(result.canonical_reference) }
         : {}),
-      ...(validTimestamp ? { capturedAt: timestamp } : {}),
+      ...(normalizedTimestamp ? { capturedAt: normalizedTimestamp } : {}),
     };
   } finally {
     client.close();
@@ -2283,10 +2319,23 @@ async function loadLocalOwnerSnapshot(profile) {
     const modelId = profile.modelId;
     const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
     const safeTool = (name, args) => client.callTool(name, args).catch(() => null);
-    const [memoriesResult, behaviorResult, activityResult, currentResult, targets] =
+    const [
+      memoriesResult,
+      behaviorResult,
+      modelFacesResult,
+      activityResult,
+      currentResult,
+      targets,
+    ] =
       await Promise.all([
         safeTool("list_memories", {}),
         safeTool("behavior_patterns", {}),
+        safeTool("get_model_snapshot", {
+          redact: true,
+          section: "faces",
+          include_evidence_refs: true,
+          limit: 100,
+        }),
         safeTool("recent_activity", {
           since,
           limit: 120,
@@ -2304,24 +2353,36 @@ async function loadLocalOwnerSnapshot(profile) {
       ]);
     const memories = parseToolJson(memoriesResult);
     const behavior = parseToolJson(behaviorResult);
+    const modelFaces = parseToolJson(modelFacesResult);
     const activity = parseToolJson(activityResult);
     const current = parseToolJson(currentResult);
     const live = buildLivePayload(activity, current);
     const files = Array.isArray(memories.files) ? memories.files : [];
-    const faces = (Array.isArray(behavior.faces) ? behavior.faces : [])
+    const projectedFaces = Array.isArray(modelFaces?.items)
+      ? modelFaces.items.filter((face) =>
+          typeof face?.id === "string" && face.id.trim()
+          && typeof face?.signature === "string" && face.signature.trim()
+          && face.status !== "inactive"
+        )
+      : [];
+    const faceCandidates = projectedFaces.length
+      ? projectedFaces
+      : (Array.isArray(behavior.faces) ? behavior.faces : []);
+    const faces = faceCandidates
+      .toSorted((a, b) =>
+        (Number(b?.observations) || 0) - (Number(a?.observations) || 0)
+      )
       .slice(0, 6)
       .map((face, index) => ({
         id: `face_${modelId}_${String(index + 1).padStart(2, "0")}`,
         text: cleanModelText(face.signature || face.text, 260),
         observations: Math.max(0, Math.round(Number(face.observations) || 0)),
         confidence: Math.min(1, Math.max(0, Number(face.confidence) || 0)),
-        evidenceRefs: [
-          modelEvidenceRef(
-            modelId,
-            "face",
-            face.id || face.signature || index + 1,
-          ),
-        ],
+        ...(typeof face.id === "string" && face.id.trim()
+          ? {
+              evidenceRefs: [modelEvidenceRef(modelId, "face", face.id)],
+            }
+          : {}),
       }))
       .filter((face) => face.text);
     const days = (Array.isArray(live.days) ? live.days : [])
@@ -2334,18 +2395,20 @@ async function loadLocalOwnerSnapshot(profile) {
           ? day.selfReading.letter.join("\n")
           : String(day.letter || ""),
         events: (Array.isArray(day.events) ? day.events : []).map(
-          (event, index) => ({
-            id: `${modelId}-live-${day.key}-${String(index + 1).padStart(2, "0")}`,
-            time: event.t || "—",
-            title: event.title || "Personal Model",
-            detail: event.detail || event.io || "",
-            app: String(event.io || "").split(" · ")[0] || "Personal Model",
-            evidenceRef: modelEvidenceRef(
-              modelId,
-              "event",
-              event.sourceId || `${day.key}-${index + 1}`,
-            ),
-          }),
+          (event, index) => {
+            const sourceId = String(event.sourceId || "").trim();
+            const evidenceRef = sourceId && !sourceId.startsWith("live-")
+              ? modelEvidenceRef(modelId, "event", sourceId)
+              : null;
+            return {
+              id: `${modelId}-live-${day.key}-${String(index + 1).padStart(2, "0")}`,
+              time: event.t || "—",
+              title: event.title || "Personal Model",
+              detail: event.detail || event.io || "",
+              app: String(event.io || "").split(" · ")[0] || "Personal Model",
+              ...(evidenceRef ? { evidenceRef } : {}),
+            };
+          },
         ),
       }))
       .filter((day) => day.id && day.events.length);
