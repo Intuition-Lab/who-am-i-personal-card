@@ -42,6 +42,13 @@ test("production installs a native SwiftUI app with an embedded backend", async 
   assert.doesNotMatch(nativeUI, /Button\(copied \? "Copied" : "Share"\)/);
   assert.match(swiftSource, /applicationShouldTerminateAfterLastWindowClosed/);
   assert.match(swiftSource, /NSStatusBar\.system\.statusItem/);
+  assert.match(swiftSource, /positionSpotlightPanel/);
+  assert.match(swiftSource, /statusButton\.convert/);
+  assert.match(swiftSource, /showSearchFromStatusItem/);
+  assert.match(swiftSource, /showAskFromStatusItem/);
+  assert.match(swiftSource, /showMemorySkyFromStatusItem/);
+  assert.match(swiftSource, /showShareFromStatusItem/);
+  assert.doesNotMatch(nativeUI, /private struct NativeTopBar/);
   assert.match(swiftSource, /\.accessory/);
   assert.match(buildScript, /for architecture in arm64 x86_64/);
   assert.match(buildScript, /\$\{architecture\}-apple-macos13\.0/);
@@ -56,4 +63,56 @@ test("production installs a native SwiftUI app with an embedded backend", async 
   assert.match(packageBuilder, /Who Am I\.app/);
   assert.match(packageBuilder, /Contents\/Resources\/product/);
   assert.match(packageBuilder, /backend_embedded_in_app/);
+});
+
+test("native app preserves the original V5 interaction surfaces without a WebView", async () => {
+  const nativeUI = await readFile(
+    path.join(appRoot, "macos/WhoAmINativeUI.swift"),
+    "utf8",
+  );
+
+  for (const surface of [
+    "NativeHeroCard",
+    "NativeCardMaterial",
+    "NativeNowPanel",
+    "NativeShareView",
+    "NativeIdentityView",
+    "NativeYearHeatmap",
+    "NativeMonthCalendar",
+    "NativeRewindTelevision",
+    "NativeMemorySky",
+    "NativeCorrectionToast",
+    "NativeConnectorDock",
+    "NativeConnectorSwipe",
+    "NativeReportsView",
+    "NativeEvidencePresentation",
+    "NativeSetupView",
+  ]) {
+    assert.match(nativeUI, new RegExp(`struct ${surface}`));
+  }
+
+  for (const detail of [
+    "Swipe your card",
+    "MEMORY SKY",
+    'case constellation = "星座"',
+    'case dust = "星尘"',
+    'case time = "时间"',
+    "过去 · 现在 · 未来",
+    "Swipe your card",
+    "\\+1 颗星",
+    'case "ceramic"',
+    'case "klein"',
+    'case "graphite"',
+    "Search this day",
+    "今天写进 Personal Model",
+    "ROOT · 今天留下的一句",
+    "ROOT · 我是谁",
+    "← → 巡星",
+    "SAME MODEL · PRIVATE INSIDE / PUBLIC OUTSIDE",
+    "划线分享",
+    "打开 Evidence",
+  ]) {
+    assert.match(nativeUI, new RegExp(detail));
+  }
+  assert.doesNotMatch(nativeUI, /WKWebView|WebKit/);
 });
