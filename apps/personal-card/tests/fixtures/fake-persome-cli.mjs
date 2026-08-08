@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 
@@ -13,8 +13,9 @@ const defaultPersona = {
   build: "MIRA_ONLY_BUILD_6C21",
 };
 let persona = defaultPersona;
+let scenarioPath = "";
 try {
-  const scenarioPath = path.resolve(
+  scenarioPath = path.resolve(
     process.env.PERSOME_ROOT || "",
     "fake-scenario.json",
   );
@@ -85,19 +86,51 @@ const toolResults = {
   current_context: {
     recent_timeline_blocks: [],
   },
-  search: {
-    hits: [
-      {
-        id: "mira-search",
-        content: persona.search,
-        path: "memory/mira.md",
-      },
-    ],
-  },
-  correct_memory: {
-    ok: true,
-  },
 };
+
+function searchResult(args = {}) {
+  if (
+    persona.emptySearch === true
+    || (persona.emptySearchQuery && String(args.query).includes(persona.emptySearchQuery))
+  ) {
+    return { query: args.query, results: [] };
+  }
+  const configured = Array.isArray(persona.searchHits)
+    ? persona.searchHits
+    : [
+        {
+          id: "mira-search",
+          content: persona.search,
+          path: "memory/mira.md",
+        },
+      ];
+  const topK = Number.isInteger(args.top_k) ? args.top_k : configured.length;
+  return {
+    query: args.query,
+    results: configured.slice(0, topK),
+  };
+}
+
+function applyCorrection(args = {}) {
+  const correction = String(args.correction || "").trim();
+  if (correction && scenarioPath) {
+    persona = {
+      ...persona,
+      search: persona.correctedSearch || correction,
+      searchHits: [
+        {
+          id: persona.correctedSearchId || "corrected-memory",
+          content: persona.correctedSearch || correction,
+          path: persona.correctedSearchPath || "memory/corrected.md",
+          timestamp: persona.correctedTimestamp || "2026-08-09T09:00:00+08:00",
+          confidence: 1,
+        },
+      ],
+    };
+    writeFileSync(scenarioPath, JSON.stringify(persona));
+  }
+  return { ok: true, applied: Boolean(correction) };
+}
 
 const lines = createInterface({ input: process.stdin });
 lines.on("line", (line) => {
@@ -117,14 +150,34 @@ lines.on("line", (line) => {
     };
   } else if (request.method === "tools/call") {
     const name = request.params?.name;
+    const args = request.params?.arguments || {};
+    if (
+      name === "search"
+      && persona.searchErrorQuery
+      && String(args.query).includes(persona.searchErrorQuery)
+    ) {
+      process.stdout.write(`${JSON.stringify({
+        jsonrpc: "2.0",
+        id: request.id,
+        error: { code: -32000, message: "private fake MCP search failure" },
+      })}\n`);
+      return;
+    }
+    const toolResult = name === "search"
+      ? searchResult(args)
+      : name === "correct_memory"
+        ? applyCorrection(args)
+        : name === "resolve_evidence"
+          ? { status: "available", reference: args.reference }
+          : toolResults[name] || {};
     result = {
       structuredContent: {
-        result: toolResults[name] || {},
+        result: toolResult,
       },
       content: [
         {
           type: "text",
-          text: JSON.stringify(toolResults[name] || {}),
+          text: JSON.stringify(toolResult),
         },
       ],
     };
