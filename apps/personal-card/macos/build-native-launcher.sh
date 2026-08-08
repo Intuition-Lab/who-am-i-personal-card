@@ -8,6 +8,8 @@ unset CDPATH
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_PATH="${SCRIPT_DIR}/WhoAmIApp.swift"
 NATIVE_UI_SOURCE_PATH="${SCRIPT_DIR}/WhoAmINativeUI.swift"
+LIFECYCLE_SOURCE_PATH="${SCRIPT_DIR}/NativeLifecycle.swift"
+LIFECYCLE_HELPER_PATH="${SCRIPT_DIR}/native-lifecycle-helper.sh"
 PRODUCT_ROOT=""
 PERSOME_ROOT=""
 PRODUCT_VERSION=""
@@ -124,7 +126,11 @@ case "${OUTPUT_DIRECTORY}" in
     ;;
 esac
 
-for source_file in "${SOURCE_PATH}" "${NATIVE_UI_SOURCE_PATH}"; do
+for source_file in \
+  "${SOURCE_PATH}" \
+  "${NATIVE_UI_SOURCE_PATH}" \
+  "${LIFECYCLE_SOURCE_PATH}" \
+  "${LIFECYCLE_HELPER_PATH}"; do
   if [[ ! -f "${source_file}" || -L "${source_file}" ]]; then
     /usr/bin/printf 'Swift source is missing or unsafe: %s\n' "${source_file}" >&2
     exit 1
@@ -168,10 +174,12 @@ SWIFTC="$(/usr/bin/xcrun --sdk macosx --find swiftc)"
 STAGING_APP="${TEMPORARY_ROOT}/Who Am I.app"
 CONTENTS="${STAGING_APP}/Contents"
 MACOS_DIRECTORY="${CONTENTS}/MacOS"
-/bin/mkdir -p "${MACOS_DIRECTORY}"
+RESOURCES_DIRECTORY="${CONTENTS}/Resources"
+/bin/mkdir -p "${MACOS_DIRECTORY}" "${RESOURCES_DIRECTORY}"
 
 for architecture in arm64 x86_64; do
   "${SWIFTC}" \
+    -j 4 \
     -sdk "${SDK_PATH}" \
     -target "${architecture}-apple-macos13.0" \
     -Onone \
@@ -179,6 +187,7 @@ for architecture in arm64 x86_64; do
     -framework SwiftUI \
     "${SOURCE_PATH}" \
     "${NATIVE_UI_SOURCE_PATH}" \
+    "${LIFECYCLE_SOURCE_PATH}" \
     -o "${TEMPORARY_ROOT}/WhoAmI-${architecture}"
 done
 
@@ -187,6 +196,9 @@ done
   "${TEMPORARY_ROOT}/WhoAmI-x86_64" \
   -output "${MACOS_DIRECTORY}/WhoAmI"
 /bin/chmod 0755 "${MACOS_DIRECTORY}/WhoAmI"
+/usr/bin/install -m 0755 \
+  "${LIFECYCLE_HELPER_PATH}" \
+  "${RESOURCES_DIRECTORY}/native-lifecycle-helper.sh"
 
 INFO_PLIST="${CONTENTS}/Info.plist"
 /usr/bin/plutil -create xml1 "${INFO_PLIST}"
