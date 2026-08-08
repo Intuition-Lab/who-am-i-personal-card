@@ -2,6 +2,7 @@
 set -euo pipefail
 umask 077
 
+GH_COMMAND_OVERRIDE="${WHOAMI_GH_COMMAND:-}"
 PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH
 unset CDPATH
@@ -196,7 +197,25 @@ if [[ "${MODE}" == "plan" ]]; then
   exit 0
 fi
 
-if ! GH_COMMAND="$(command -v gh)"; then
+if [[ -n "${GH_COMMAND_OVERRIDE}" ]]; then
+  case "${GH_COMMAND_OVERRIDE}" in
+    /*) ;;
+    *) fail "WHOAMI_GH_COMMAND must be an absolute path" ;;
+  esac
+  if [[ ! -f "${GH_COMMAND_OVERRIDE}" || ! -x "${GH_COMMAND_OVERRIDE}" \
+    || -L "${GH_COMMAND_OVERRIDE}" || ! -O "${GH_COMMAND_OVERRIDE}" ]]; then
+    fail "WHOAMI_GH_COMMAND is missing or unsafe"
+  fi
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    gh_command_mode="$(stat -f '%Lp' "${GH_COMMAND_OVERRIDE}")"
+  else
+    gh_command_mode="$(stat -c '%a' "${GH_COMMAND_OVERRIDE}")"
+  fi
+  if (( (8#${gh_command_mode} & 8#022) != 0 )); then
+    fail "WHOAMI_GH_COMMAND must not be group- or world-writable"
+  fi
+  GH_COMMAND="${GH_COMMAND_OVERRIDE}"
+elif ! GH_COMMAND="$(command -v gh)"; then
   fail "GitHub CLI (gh) is required for --${MODE}"
 fi
 
