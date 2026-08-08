@@ -2,7 +2,7 @@
 
 状态：Beta 实施规范
 
-基线：`cc04f1ae30031ed82f06e420bf84110aae00ac06`
+基线：`codex/self-contained-package` @ `dcfedc1cb61ffa51d3080d4568ed26ce7bce9786`
 
 适用范围：Card、Spotlight / Now、Rewind、Identity / Memory Sky、Connector、Report、Evidence、Search / Ask、Correct / Share
 
@@ -227,7 +227,7 @@ Who Am I 展示的是当前 `activeModel` 在当前授权范围内的内容。�
 | 表达 | 使用“记录显示”“模型目前推断”“基于这些来源”，不用“你就是”“你一定会” |
 | 更新 | 显示生成时间；Correct 后下一次 Ask 必须读取新结果 |
 
-当前基线的 Search 只对 Snapshot 做字面包含匹配，Ask 只拼接前两条结果。它们不能作为正式内容质量标准；对应替换由 `codex/content-backend` 实施。
+历史基线曾只对 Snapshot 做字面包含匹配，Ask 只拼接前两条结果。当前基线已接入本机语义 Search、带 Evidence 的 Ask、证据不足拒答和保守降级；正式内容质量仍以本节和 CQ-001 至 CQ-009 为准。
 
 ### 3.9 Correct / Share
 
@@ -388,41 +388,42 @@ Root 仍可为空；一周数据不应自动成为“你是谁”的最终答案
 
 发布门槛：CQ-001 至 CQ-024 全部有自动化或可复核的人工证据；任何跨模型泄漏、无依据事实性回答、虚假 Evidence、错误成功态均为 P0。
 
-## 7. 当前开发分支接口映射
+## 7. 当前实现与开放交付映射
 
-### 7.1 正在进行的四个内容相关分支
+### 7.1 已集成到产品基线的内容能力
 
-| 分支 | 已在做 | 本规范期望接口 | 不应重复做 |
+| 原交付分支 | 当前基线状态 | 已落地接口 | 后续边界 |
 | --- | --- | --- | --- |
-| `codex/content-backend` | 本机完整语义 Search、Ask 有依据/拒答、内容元数据、Correct 后缓存刷新 | Search result / Ask response 提供 `contentType`、`sourceRefs`、`timeRange`、`generatedAt`、`method`、可选 `confidence`；无结果和证据不足为结构化状态 | Swift 展示、Evidence contract、Report 语义 |
-| `codex/evidence-corrections` | Evidence 来源分型、resolver、断链状态、跨模型约束、Correct receipt / affected / verified | Evidence 提供 `sourceType`、`availability`、`occurredAt`、`sourceApp`、`sourceTitle`、`supportedClaim`、`directness`；Correct 提供传播状态 | Search 排序、Swift 页面、Report 聚合 |
-| `codex/native-ui-truth` | Swift Search / Ask 状态、内容类型标签、未来降级、Report / Share 诚实化、空状态和无障碍 | 对新增字段全部 optional 解码；缺元数据时使用保守标签；采用第 5 节终稿 | Node 搜索、Evidence resolver、发布脚本 |
-| `codex/beta-e2e` | 内容场景、真实 Connector 事件、Report 语义、跨模型和发布 gate | 将 CQ 场景固化为 deterministic fixtures；Report 满足实质门槛 | Search / Ask 核心、Evidence schema、Swift UI |
+| `codex/content-backend` | 已集成 | 本机完整语义 Search、带 Evidence 的 Ask、拒答、内容元数据和 Correct 后刷新 | 继续补真实用户质量评估，不再维护重复 PR #2 |
+| `codex/evidence-corrections` | 已集成 | Evidence 来源分型、resolver、断链状态、跨模型约束和 Correct 传播状态 | 不再维护重复 PR #6 |
+| `codex/native-ui-truth` | 已集成 | 可选字段兼容解码、搜索/问答状态、内容类型标签、未来降级、诚实 Report / Copy 和无障碍状态 | 不再维护重复 PR #4 |
+| `codex/beta-e2e` | 已集成 | deterministic 内容评估、真实 Connector 事件、Report 实质门槛、跨模型和 release gate | CQ-010、CQ-012、CQ-013、CQ-023 仍需专门验收 |
 
-### 7.2 其他并行交付分支
+### 7.2 仍开放的并行交付
 
-`codex/native-app-lifecycle` 和 `codex/apple-signing-notarization` 处理安装、更新、卸载、签名和公证，不改变内容语义。它们应在最终集成测试中覆盖：升级不恢复旧用户 Card、重装不引入演示 Profile、签名后的 App 仍只连接当前 macOS owner 数据。
+`codex/native-app-lifecycle`（PR #5）、`codex/apple-signing-notarization`（PR #7）和 `codex/p0-real-runtime-closure`（PR #8）都以同一产品基线为父分支。它们分别处理应用生命周期、Developer ID / 公证，以及真实 Runtime P0 闭环与搜索延迟，不改变本规范的内容类型定义。
+
+最终集成测试仍需覆盖：升级不恢复旧用户 Card、重装不引入演示 Profile、签名后的 App 只连接当前 macOS owner 数据，以及产品锁定的 Runtime 身份与已通过的上游提交完全一致。
 
 ### 7.3 集成顺序
 
-1. 先集成 `codex/evidence-corrections` 的向后兼容 contract。
-2. 再集成 `codex/content-backend`，解决 Provider / SnapshotBackedProvider 的重叠修改。
-3. 集成 `codex/beta-e2e` 的 Connector / Report 和测试；以真实事件结构为准。
-4. 集成 `codex/native-ui-truth`，对最终后端字段做一次解码核对。
-5. 最后运行 CQ-001 至 CQ-024、双 owner、Cecilia → Lin → Cecilia、production no-demo 和原生截图验收。
+1. 先合并本规范 PR #3；它只改变文档。
+2. PR #5、#7、#8 按各自 CI 与审查完成情况依次合入 `codex/self-contained-package`，每次合入后都重新同步尚未合并的兄弟分支。
+3. 三个交付合齐后运行 CQ-001 至 CQ-024、双 owner、Cecilia → Lin → Cecilia、production no-demo、签名应用和原生截图验收。
+4. 所有发布动作继续受 `RELEASE_STATUS=HOLD` 约束；代码合并不自动授权发布。
 
 ## 8. P0 / P1 / P2 Backlog
 
 ### P0 — 发给首批用户前必须完成
 
-- [ ] 语义 Search、Ask Evidence 和拒答闭环；`codex/content-backend` 已覆盖。
-- [ ] Evidence 直接/派生/断链分型和 Correct 传播状态；`codex/evidence-corrections` 已覆盖。
+- [x] 语义 Search、Ask Evidence 和拒答闭环；当前基线已有自动化回归。
+- [x] Evidence 直接/派生/断链分型和 Correct 传播状态；当前基线已有自动化回归。
 - [ ] 固定未来时间删除、Weekly Letter 单日冒充修复、Share 改为 Copy；`codex/native-ui-truth` 部分覆盖，后端模板清理仍需集成时认领。
-- [ ] 只有真实 Agent 事件才能生成 Report；`codex/beta-e2e` 已覆盖。
+- [x] 只有真实 Agent 事件才能生成 Report；当前基线已有 Connector E2E 回归。
 - [ ] 新用户 0 记忆和 Runtime 错误不显示任何 Demo / 缓存他人内容；已有测试，需在最终 DMG 复验。
 - [ ] CQ-001 至 CQ-024 形成最终测试矩阵；`codex/beta-e2e` 部分覆盖，CQ-010、CQ-012、CQ-013、CQ-023 仍需补测。
-- [ ] 原生页面展示统一的内容类型、时间范围、来源和可用性；`codex/native-ui-truth` 已覆盖。
-- [ ] 合并四分支后的 contract 冲突解决和全量回归；当前无人覆盖，必须开独立 integration 任务。
+- [x] 原生页面展示统一的内容类型、时间范围、来源和可用性；当前基线已有兼容解码和状态回归。
+- [x] 四个内容交付的 contract 冲突已在产品基线解决，并通过本地产品与 foundation 全量回归；最终 DMG / 发布验收仍由 release gate 单独跟踪。
 
 ### P1 — 20 人扩量前完成
 
