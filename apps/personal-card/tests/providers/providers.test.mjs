@@ -137,6 +137,8 @@ test("FixtureProvider model operations remain bound to the requested model", asy
   assert.equal(context.modelId, "lin-demo");
   assert.ok(search.every(({ modelId }) => modelId === "lin-demo"));
   assert.equal(evidence.modelId, "lin-demo");
+  assert.equal(evidence.source.type, "derived-summary");
+  assert.equal(evidence.availability.status, "unavailable");
   assert.ok(reports.every(({ modelId }) => modelId === "lin-demo"));
   assert.equal(connector.modelId, "lin-demo");
 
@@ -311,6 +313,201 @@ test("LocalPersomeProvider degrades a failed MCP search to model-bound Snapshot 
   assert.equal(JSON.stringify(results).includes("/Users/private"), false);
 });
 
+test("LocalPersomeProvider resolves original memory/activity records without promoting broken links", async () => {
+  const provider = createLocalProvider({
+    operations: {
+      resolveEvidence: async ({ reference }) => {
+        if (reference.endsWith(":memory:mem-01")) {
+          return {
+            sourceType: "memory",
+            recordId: "mem-01",
+            originalTime: "2026-08-06T03:20:00.000Z",
+            sourceApp: "Notes",
+            sourceTitle: "Field note",
+            supportedClaims: ["Field observation changes the decision."],
+            support: "direct",
+            content: { text: "Original memory text" },
+          };
+        }
+        if (reference.endsWith(":activity:activity-01")) {
+          return {
+            sourceType: "activity",
+            recordId: "activity-01",
+            occurredAt: "2026-08-07T01:40:00.000Z",
+            application: "Figma",
+            title: "Prototype review",
+            claim: "The prototype was reviewed.",
+            relationship: "direct",
+            content: { durationMinutes: 38 },
+          };
+        }
+        throw new Error("raw source disconnected");
+      },
+    },
+  });
+
+  const [memory, activity, broken] = await Promise.all([
+    provider.getEvidence("cecilia", "cecilia:memory:mem-01"),
+    provider.getEvidence("cecilia", "cecilia:activity:activity-01"),
+    provider.getEvidence("cecilia", "cecilia:event:2026-08-07:01"),
+  ]);
+  assert.equal(memory.source.type, "persome-memory");
+  assert.equal(memory.source.application, "Notes");
+  assert.equal(memory.supports[0].relationship, "direct");
+  assert.equal(memory.availability.status, "available");
+  assert.equal(activity.source.type, "persome-activity");
+  assert.equal(activity.source.originalTime, "2026-08-07T01:40:00.000Z");
+  assert.equal(broken.source.type, "derived-summary");
+  assert.equal(broken.availability.status, "unavailable");
+  assert.equal(broken.availability.reason, "original-source-unavailable");
+});
+
+test("Local Evidence resolver rejects a cross-model or malformed resolved record", async () => {
+  const provider = createLocalProvider({
+    operations: {
+      resolveEvidence: async () => ({
+        modelId: "lin-demo",
+        reference: "lin-demo:memory:foreign",
+        sourceType: "memory",
+        originalTime: "2026-08-06T03:20:00.000Z",
+        content: {},
+      }),
+    },
+  });
+
+  await assert.rejects(
+    provider.getEvidence("cecilia", "cecilia:memory:mem-01"),
+    (error) => error.code === "INVALID_PROVIDER_RESPONSE",
+  );
+});
+
+test("Local correction reloads the Snapshot and only succeeds after old conclusions are deprioritized", async () => {
+  let snapshot = await loadFixture("cecilia");
+  const previousConclusion = snapshot.personalModel.faces[0].text;
+  const replacement = "先确认用户授权，再决定是否公开分发。";
+  let snapshotLoads = 0;
+  const provider = new LocalPersomeProvider({
+    modelIds: ["cecilia"],
+    loadSnapshot: async () => {
+      snapshotLoads += 1;
+      return snapshot;
+    },
+    operations: {
+      correct: async () => {
+        snapshot = structuredClone(snapshot);
+        snapshot.personalModel.faces[0].text = replacement;
+        snapshot.personalModel.updatedAt = "2026-08-07T08:05:00.000Z";
+        return {
+          ok: true,
+          receipt: "correction-001",
+          affected: [
+            {
+              reference: "cecilia:face:01",
+              previousConclusion,
+              replacement,
+            },
+          ],
+        };
+      },
+    },
+  });
+
+  const correction = await provider.correct(
+    "cecilia",
+    "That conclusion is no longer accurate.",
+  );
+  assert.equal(correction.status, "applied");
+  assert.equal(correction.receipt, "correction-001");
+  assert.equal(correction.receiptSource, "runtime");
+  assert.equal(correction.affected[0].state, "deprioritized");
+  assert.equal(correction.verification.status, "verified");
+  assert.equal(correction.verification.refreshed, true);
+  assert.equal(correction.verification.oldConclusionDeprioritized, true);
+  assert.equal(correction.verification.updatedAt, "2026-08-07T08:05:00.000Z");
+  assert.equal(snapshotLoads, 2);
+  assert.equal((await provider.getSnapshot("cecilia")).personalModel.faces[0].text, replacement);
+});
+
+test("Local correction adapts the pinned Persome 0.3.2 {kind, applied, reason, ok} response", async () => {
+  let snapshot = await loadFixture("cecilia");
+  const previousConclusion = snapshot.personalModel.faces[0].text;
+  const replacement = "用户明确授权后，才把内容带到外部 Agent。";
+  const provider = new LocalPersomeProvider({
+    modelIds: ["cecilia"],
+    loadSnapshot: async () => snapshot,
+    operations: {
+      correct: async () => {
+        snapshot = structuredClone(snapshot);
+        snapshot.personalModel.faces[0].text = replacement;
+        snapshot.personalModel.updatedAt = "2026-08-07T08:06:00.000Z";
+        return {
+          kind: "update",
+          applied: [
+            "superseded user-cecilia.md#entry-01",
+            "re-derived schema for user-cecilia.md",
+          ],
+          reason: "authoritative correction",
+          ok: true,
+        };
+      },
+    },
+  });
+
+  const correction = await provider.correct(
+    "cecilia",
+    "Only share my content after explicit authorization.",
+  );
+  assert.equal(correction.status, "applied");
+  assert.equal(correction.receiptSource, "product");
+  assert.match(
+    correction.receipt,
+    /^cecilia:correction:[a-f0-9]{64}$/,
+  );
+  assert.deepEqual(
+    correction.affected.map(({ previousConclusion: value, state }) => ({
+      value,
+      state,
+    })),
+    [{ value: previousConclusion, state: "deprioritized" }],
+  );
+  assert.equal(correction.verification.oldConclusionDeprioritized, true);
+  assert.equal(JSON.stringify(await provider.getSnapshot("cecilia")).includes(previousConclusion), false);
+});
+
+test("Local correction never returns success when receipt, affected state, or propagation is missing", async () => {
+  const original = await loadFixture("cecilia");
+  const previousConclusion = original.personalModel.faces[0].text;
+  for (const operationResult of [
+    { ok: true },
+    {
+      kind: "update",
+      applied: ["superseded user-cecilia.md#entry-01"],
+      reason: "authoritative correction",
+      ok: true,
+    },
+    {
+      ok: true,
+      receipt: "correction-stale",
+      affected: [
+        {
+          reference: "cecilia:face:01",
+          previousConclusion,
+        },
+      ],
+    },
+  ]) {
+    const provider = new LocalPersomeProvider({
+      modelIds: ["cecilia"],
+      loadSnapshot: async () => original,
+      operations: { correct: async () => operationResult },
+    });
+    await assert.rejects(
+      provider.correct("cecilia", "Correction"),
+      (error) => error.code === "CORRECTION_VERIFICATION_FAILED",
+    );
+  }
+});
+
 test("RemotePersonalModelProvider sends Bearer auth and binds every operation", async () => {
   const requests = [];
   const provider = createRemoteProvider({
@@ -334,6 +531,8 @@ test("RemotePersonalModelProvider sends Bearer auth and binds every operation", 
   assert.ok(search.every(({ modelId }) => modelId === "lin-demo"));
   assert.equal(evidence.modelId, "lin-demo");
   assert.equal(correction.modelId, "lin-demo");
+  assert.equal(correction.status, "accepted");
+  assert.equal(correction.verification.status, "unverified");
   assert.equal(connector.modelId, "lin-demo");
   assert.ok(reports.every(({ modelId }) => modelId === "lin-demo"));
   assert.ok(
@@ -417,6 +616,22 @@ test("RemotePersonalModelProvider rejects cross-model responses", async () => {
       "lin-demo:event:2026-08-07:01",
     ),
     (error) => error.code === "MODEL_ID_MISMATCH",
+  );
+
+  const changedReferenceProvider = createRemoteProvider({
+    fetchImpl: async () =>
+      jsonResponse({
+        modelId: "lin-demo",
+        reference: "lin-demo:event:different",
+        content: {},
+      }),
+  });
+  await assert.rejects(
+    changedReferenceProvider.getEvidence(
+      "lin-demo",
+      "lin-demo:event:2026-08-07:01",
+    ),
+    (error) => error.code === "EVIDENCE_RESPONSE_MISMATCH",
   );
 });
 

@@ -103,6 +103,7 @@ const reportService = new ReportService({
 const evidenceService = new EvidenceService({
   providerRegistry,
   sessionService: connectorSessionService,
+  eventStore: connectorEventStore,
 });
 const activeConnectorSessions = new Map();
 
@@ -214,6 +215,8 @@ function ownerProviderFor(profile) {
         contentBackend.invalidate(modelId);
         return result;
       },
+      resolveEvidence: async ({ modelId, reference }) =>
+        resolveLocalEvidence(modelId, reference),
     },
   });
 }
@@ -1816,8 +1819,17 @@ async function askActiveModel(req, res, url) {
 async function correctActiveModel(req, res, url) {
   const body = await readJsonBody(req);
   const context = modelContext(req, res, url, body, "model:correct");
-  const correction = String(body.correction || "").trim().slice(0, 2400);
-  if (!correction) {
+  const correction = typeof body.correction === "string"
+    ? body.correction.trim().slice(0, 2400)
+    : body.correction && typeof body.correction === "object"
+      ? {
+          ...body.correction,
+          text: String(
+            body.correction.text || body.correction.correction || "",
+          ).trim().slice(0, 2400),
+        }
+      : "";
+  if (!correction || (typeof correction === "object" && !correction.text)) {
     sendJson(res, 400, {
       ok: false,
       code: "CORRECTION_REQUIRED",
@@ -1831,10 +1843,31 @@ async function correctActiveModel(req, res, url) {
     correction,
     context.grant,
   );
+  if (
+    result?.status !== "applied" ||
+    result?.verification?.status !== "verified" ||
+    result?.verification?.oldConclusionDeprioritized !== true
+  ) {
+    const error = new Error(
+      "更正已被接收，但刷新后的 Personal Model 尚未确认旧结论已降级。",
+    );
+    error.code = "CORRECTION_VERIFICATION_FAILED";
+    error.status = 409;
+    throw error;
+  }
+  const refreshed = await sessionModelService.refreshModel({
+    sessionId: context.sessionId,
+    expectedRevision: context.revision,
+  });
   sendJson(res, 200, {
     ok: true,
     modelId: context.modelId,
-    revision: context.revision,
+    revision: refreshed.revision,
+    receipt: result.receipt,
+    receiptSource: result.receiptSource,
+    status: result.status,
+    affected: result.affected,
+    verification: result.verification,
     result,
   });
 }
@@ -2084,6 +2117,121 @@ function modelEvidenceRef(modelId, kind, value) {
     .replace(/^-+|-+$/g, "")
     .slice(0, 72) || "memory";
   return `${modelId}:${kind}:${safe}`;
+}
+
+function runtimeReferenceFromModelEvidence(modelId, reference) {
+  const prefix = `${modelId}:`;
+  if (!String(reference).startsWith(prefix)) return "";
+  const partitioned = String(reference).slice(prefix.length);
+  const separator = partitioned.indexOf(":");
+  return separator >= 0 ? partitioned.slice(separator + 1) : "";
+}
+
+function modelBoundRuntimeReference(modelId, source) {
+  const reference = String(source?.reference || source?.id || "").trim();
+  const kind = String(source?.kind || "source")
+    .replace(/[^A-Za-z0-9_-]+/g, "-") || "source";
+  return reference ? `${modelId}:${kind}:${reference}` : null;
+}
+
+async function resolveLocalEvidence(modelId, reference) {
+  const runtimeReference = runtimeReferenceFromModelEvidence(
+    modelId,
+    reference,
+  );
+  if (!runtimeReference) return null;
+  const client = await connectPersome();
+  try {
+    const result = parseToolJson(
+      await client.callTool("resolve_evidence", {
+        reference: runtimeReference,
+      }),
+    );
+    const kind = String(result.kind || "unknown");
+    const status = String(result.status || "missing");
+    const summary = String(result.summary || "").trim();
+    const timestamp = String(
+      result.metadata?.occurred_at || result.timestamp || "",
+    ).trim();
+    const validTimestamp = Number.isFinite(Date.parse(timestamp));
+    if (
+      kind === "unknown" ||
+      status === "missing" ||
+      !summary
+    ) {
+      return null;
+    }
+
+    const rawKind = kind === "memory"
+      ? "persome-memory"
+      : ["activity", "capture"].includes(kind) &&
+          status !== "metadata_only"
+        ? "persome-activity"
+        : null;
+    if (rawKind && !validTimestamp) return null;
+    const sourceType = rawKind || "derived-summary";
+    const lineage = (Array.isArray(result.sources) ? result.sources : [])
+      .map((source) => ({
+        relation: String(source.relation || "lineage"),
+        kind: String(source.kind || "source"),
+        reference: modelBoundRuntimeReference(modelId, source),
+        label: String(source.label || ""),
+        timestamp:
+          typeof source.timestamp === "string" ? source.timestamp : null,
+      }))
+      .filter(({ reference: sourceReference }) => sourceReference);
+    const history = (Array.isArray(result.history) ? result.history : [])
+      .map((entry) => ({
+        relation: String(entry.relation || "history"),
+        kind: String(entry.kind || "source"),
+        reference: modelBoundRuntimeReference(modelId, entry),
+        label: String(entry.label || ""),
+        timestamp:
+          typeof entry.timestamp === "string" ? entry.timestamp : null,
+      }))
+      .filter(({ reference: historyReference }) => historyReference);
+    return {
+      modelId,
+      reference,
+      source: {
+        type: sourceType,
+        originalTime: validTimestamp ? timestamp : null,
+        application: String(
+          result.metadata?.app_name ||
+          result.metadata?.source_kind ||
+          "Persome",
+        ),
+        title: String(result.label || kind),
+        ...(result.id ? { recordId: String(result.id) } : {}),
+      },
+      supports: [
+        {
+          claim: summary,
+          relationship: rawKind ? "direct" : "indirect",
+        },
+      ],
+      availability: { status: "available" },
+      content: {
+        runtimeReceipt: result.canonical_reference || runtimeReference,
+        kind,
+        status,
+        summary,
+        path: result.path || null,
+        metadata:
+          result.metadata && typeof result.metadata === "object"
+            ? result.metadata
+            : {},
+        lineage,
+        history,
+      },
+      ...(result.canonical_reference
+        ? { receipt: String(result.canonical_reference) }
+        : {}),
+      ...(validTimestamp ? { capturedAt: timestamp } : {}),
+    };
+  } finally {
+    client.close();
+  }
 }
 
 async function loadLocalOwnerSnapshot(profile) {

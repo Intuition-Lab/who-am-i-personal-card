@@ -114,13 +114,37 @@ function searchableEntries(snapshot) {
   return entries;
 }
 
-function evidenceContent(snapshot, reference) {
+function derivedSnapshotEvidence({ content, recordId, application, title, claim }) {
+  return {
+    content,
+    source: {
+      type: "derived-summary",
+      originalTime: null,
+      application: application || null,
+      title: title || null,
+      recordId,
+    },
+    supports:
+      typeof claim === "string" && claim.trim()
+        ? [{ claim: claim.trim(), relationship: "indirect" }]
+        : [],
+    availability: {
+      status: "unavailable",
+      reason: "original-source-unavailable",
+    },
+  };
+}
+
+function snapshotEvidence(snapshot, reference) {
   for (const face of snapshot.personalModel.faces) {
     if (face.evidenceRefs?.includes(reference)) {
-      return {
-        kind: "face",
-        face,
-      };
+      return derivedSnapshotEvidence({
+        content: { kind: "face", face },
+        recordId: face.id,
+        application: "Persome",
+        title: "Personal Model face",
+        claim: face.text,
+      });
     }
   }
 
@@ -129,14 +153,20 @@ function evidenceContent(snapshot, reference) {
       (candidate) => candidate.evidenceRef === reference,
     );
     if (event) {
-      return {
-        kind: "event",
-        day: {
-          id: day.id,
-          title: day.title,
+      return derivedSnapshotEvidence({
+        content: {
+          kind: "event",
+          day: {
+            id: day.id,
+            title: day.title,
+          },
+          event,
         },
-        event,
-      };
+        recordId: event.id,
+        application: event.app,
+        title: event.title,
+        claim: event.detail,
+      });
     }
   }
 
@@ -144,11 +174,21 @@ function evidenceContent(snapshot, reference) {
     candidate.evidenceRefs.includes(reference),
   );
   if (report) {
-    return {
-      kind: "report",
-      reportId: report.id,
+    const connector = snapshot.connectors.find(
+      (candidate) => candidate.id === report.connectorId,
+    );
+    return derivedSnapshotEvidence({
+      content: {
+        kind: "report",
+        reportId: report.id,
+        title: report.title,
+        summary: report.summary,
+      },
+      recordId: report.id,
+      application: connector?.product || report.connectorId,
       title: report.title,
-    };
+      claim: report.summary,
+    });
   }
 
   return null;
@@ -218,8 +258,8 @@ export class SnapshotBackedPersonalModelProvider extends PersonalModelProvider {
     }
 
     const snapshot = await this.getSnapshot(modelId, grant, options);
-    const content = evidenceContent(snapshot, reference);
-    if (content === null) {
+    const evidence = snapshotEvidence(snapshot, reference);
+    if (evidence === null) {
       throw new PersonalModelProviderError(
         "EVIDENCE_NOT_FOUND",
         "The requested Evidence was not found.",
@@ -230,7 +270,7 @@ export class SnapshotBackedPersonalModelProvider extends PersonalModelProvider {
     return parsePersonalModelEvidenceResponse({
       modelId,
       reference,
-      content,
+      ...evidence,
     });
   }
 

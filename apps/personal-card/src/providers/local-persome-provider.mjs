@@ -1,9 +1,14 @@
+import { createHash } from "node:crypto";
+
 import {
   PersonalModelProviderError,
   assertPersonalModelProvider,
   assertSafeModelId,
 } from "../contracts/personal-model-provider.mjs";
-import { parsePersonalModelEvidenceResponse } from "../contracts/personal-model-card.mjs";
+import {
+  parsePersonalModelCorrectionResponse,
+  parsePersonalModelEvidenceResponse,
+} from "../contracts/personal-model-card.mjs";
 import {
   buildGroundedAnswer,
   normalizeSearchOptions,
@@ -15,6 +20,178 @@ import {
   freezeCopy,
   validateSnapshotForModel,
 } from "./snapshot-backed-provider.mjs";
+import { parseResolvedPersonalModelEvidence } from "../evidence/evidence-record.mjs";
+
+function normalizeConclusion(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .toLocaleLowerCase();
+}
+
+function sourceReference(value) {
+  return value?.metadata?.sourceRefs?.[0] ?? value?.evidenceRefs?.[0];
+}
+
+function prioritizedConclusionEntries(snapshot) {
+  const entries = [];
+  const add = (text, value) => {
+    const normalized = normalizeConclusion(text);
+    if (!normalized) return;
+    const reference = sourceReference(value);
+    entries.push({
+      text: String(text).trim(),
+      normalized,
+      ...(typeof reference === "string" ? { reference } : {}),
+    });
+  };
+
+  add(snapshot.personalModel.root, snapshot.personalModel);
+  snapshot.personalModel.faces.forEach((face) => add(face.text, face));
+  add(snapshot.identity.description, snapshot.identity);
+  add(snapshot.identity.dailyLine, snapshot.identity);
+  snapshot.identity.weeklyLetter.forEach((line) =>
+    add(line, snapshot.identity),
+  );
+  snapshot.now.items.forEach((item) => {
+    add(item.title, item);
+    add(item.why, item);
+  });
+  snapshot.time.days.forEach((day) => {
+    add(day.portrait, day);
+    add(day.letter, day);
+  });
+  snapshot.reports.forEach((report) => {
+    add(report.summary, report);
+    report.sections
+      .filter(({ kind }) => kind === "understanding")
+      .forEach((section) => add(section.body, section));
+  });
+
+  const unique = new Map();
+  entries.forEach((entry) => {
+    if (!unique.has(entry.normalized)) unique.set(entry.normalized, entry);
+  });
+  return [...unique.values()];
+}
+
+function normalizeCorrectionRequest(correction) {
+  if (typeof correction === "string") {
+    const text = correction.trim();
+    if (text) return { text, affected: [] };
+  }
+  if (correction !== null && typeof correction === "object") {
+    const text = String(correction.text ?? correction.correction ?? "").trim();
+    if (text) {
+      const affected = Array.isArray(correction.affected)
+        ? correction.affected
+        : correction.previousConclusion
+          ? [{
+              reference: correction.reference,
+              previousConclusion: correction.previousConclusion,
+              replacement: correction.replacement,
+            }]
+          : [];
+      return { text, affected };
+    }
+  }
+  throw new PersonalModelProviderError(
+    "INVALID_CORRECTION",
+    "A non-empty correction is required.",
+    { status: 400 },
+  );
+}
+
+function operationCorrectionPayload(result) {
+  if (
+    result?.result &&
+    typeof result.result === "object" &&
+    !Array.isArray(result.result)
+  ) {
+    return result.result;
+  }
+  return result;
+}
+
+function affectedConclusions(result, request) {
+  const candidates = Array.isArray(result?.affected)
+    ? result.affected
+    : request.affected;
+  return candidates
+    .map((affected) =>
+      typeof affected === "string"
+        ? { previousConclusion: affected }
+        : affected,
+    )
+    .filter((affected) =>
+      affected &&
+      typeof affected.previousConclusion === "string" &&
+      affected.previousConclusion.trim(),
+    )
+    .map((affected) => ({
+      ...(typeof affected.reference === "string"
+        ? { reference: affected.reference }
+        : {}),
+      previousConclusion: affected.previousConclusion.trim(),
+      ...(typeof affected.replacement === "string"
+        ? { replacement: affected.replacement }
+        : {}),
+    }));
+}
+
+function deriveAffectedConclusions(beforeEntries, afterConclusions) {
+  return beforeEntries
+    .filter(({ normalized }) => !afterConclusions.has(normalized))
+    .map(({ text, reference }) => ({
+      ...(reference ? { reference } : {}),
+      previousConclusion: text,
+    }));
+}
+
+function productCorrectionReceipt({
+  modelId,
+  request,
+  result,
+  before,
+  after,
+  affected,
+}) {
+  const snapshotFingerprint = (snapshot) =>
+    createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
+  const digest = createHash("sha256")
+    .update(
+      JSON.stringify({
+        version: 1,
+        modelId,
+        correction: request.text,
+        runtime: {
+          kind: result.kind ?? null,
+          applied: Array.isArray(result.applied) ? result.applied : null,
+          reason: result.reason ?? null,
+          ok: result.ok ?? null,
+        },
+        previousUpdatedAt: before.personalModel.updatedAt,
+        updatedAt: after.personalModel.updatedAt,
+        beforeSnapshot: snapshotFingerprint(before),
+        afterSnapshot: snapshotFingerprint(after),
+        affected: affected.map(({ reference, previousConclusion }) => ({
+          reference: reference ?? null,
+          previousConclusion: normalizeConclusion(previousConclusion),
+        })),
+      }),
+    )
+    .digest("hex");
+  return `${modelId}:correction:${digest}`;
+}
+
+function correctionVerificationError() {
+  return new PersonalModelProviderError(
+    "CORRECTION_VERIFICATION_FAILED",
+    "The correction was not confirmed by a refreshed Personal Model.",
+    { status: 409 },
+  );
+}
 
 export class LocalPersomeProvider extends SnapshotBackedPersonalModelProvider {
   constructor({
@@ -198,21 +375,74 @@ export class LocalPersomeProvider extends SnapshotBackedPersonalModelProvider {
       );
     }
     if (typeof this.operations.getEvidence === "function") {
+      let resolved = null;
       try {
-        const evidence = parsePersonalModelEvidenceResponse(
-          await this.operations.getEvidence({
-            modelId,
-            reference,
-            grant,
-            signal: options.signal,
-          }),
-        );
-        if (evidence.modelId !== modelId) throw new Error("model mismatch");
-        return evidence;
+        resolved = await this.operations.getEvidence({
+          modelId,
+          reference,
+          grant,
+          signal: options.signal,
+        });
       } catch {
-        // Snapshot evidence remains available for legacy Card references.
+        // Search Evidence may have expired from the bounded content cache.
+      }
+      if (resolved !== null && resolved !== undefined) {
+        try {
+          const evidence = parsePersonalModelEvidenceResponse(resolved);
+          if (
+            evidence.modelId !== modelId ||
+            evidence.reference !== reference
+          ) {
+            throw new TypeError("The cached Evidence changed ownership.");
+          }
+          return evidence;
+        } catch {
+          throw new PersonalModelProviderError(
+            "INVALID_PROVIDER_RESPONSE",
+            "The local content backend returned invalid Evidence.",
+            { status: 502 },
+          );
+        }
       }
     }
+
+    if (typeof this.operations.resolveEvidence === "function") {
+      let resolved = null;
+      try {
+        resolved = await this.operations.resolveEvidence({
+          modelId,
+          reference,
+          grant,
+          signal: options.signal,
+        });
+      } catch {
+        // A disconnected resolver is treated like a broken legacy link. The
+        // Snapshot fallback below remains explicit about unavailability.
+      }
+      if (resolved !== null && resolved !== undefined) {
+        try {
+          const evidence = parseResolvedPersonalModelEvidence({
+            modelId,
+            reference,
+            resolved,
+          });
+          if (
+            evidence.modelId !== modelId ||
+            evidence.reference !== reference
+          ) {
+            throw new TypeError("The resolved Evidence changed ownership.");
+          }
+          return evidence;
+        } catch {
+          throw new PersonalModelProviderError(
+            "INVALID_PROVIDER_RESPONSE",
+            "The local Evidence resolver returned an invalid record.",
+            { status: 502 },
+          );
+        }
+      }
+    }
+
     return super.getEvidence(modelId, reference, grant, options);
   }
 
@@ -222,16 +452,31 @@ export class LocalPersomeProvider extends SnapshotBackedPersonalModelProvider {
       return super.correct(modelId, correction, grant, options);
     }
 
+    const request = normalizeCorrectionRequest(correction);
+    if (
+      request.affected.some(
+        (affected) =>
+          affected !== null &&
+          typeof affected === "object" &&
+          typeof affected.reference === "string" &&
+          !affected.reference.startsWith(`${modelId}:`),
+      )
+    ) {
+      throw new PersonalModelProviderError(
+        "EVIDENCE_MODEL_MISMATCH",
+        "The correction target belongs to another Personal Model.",
+        { status: 403 },
+      );
+    }
+    const before = await this.getSnapshot(modelId, grant, options);
+    let rawResult;
     try {
-      const result = await this.operations.correct({
+      rawResult = await this.operations.correct({
         modelId,
-        correction,
+        correction: request.text,
+        request: freezeCopy(request),
         grant,
         signal: options.signal,
-      });
-      return freezeCopy({
-        modelId,
-        result,
       });
     } catch {
       throw new PersonalModelProviderError(
@@ -240,5 +485,98 @@ export class LocalPersomeProvider extends SnapshotBackedPersonalModelProvider {
         { status: 502 },
       );
     }
+
+    const result = operationCorrectionPayload(rawResult);
+    if (result === null || typeof result !== "object" || result.ok === false) {
+      throw new PersonalModelProviderError(
+        "LOCAL_OPERATION_FAILED",
+        "The local Personal Model operation failed.",
+        { status: 502 },
+      );
+    }
+
+    const runtimeReceipt =
+      typeof result.receipt === "string" && result.receipt.trim()
+        ? result.receipt.trim()
+        : typeof result.correctionReceipt === "string" &&
+            result.correctionReceipt.trim()
+          ? result.correctionReceipt.trim()
+          : null;
+    if (Array.isArray(result.applied) && result.applied.length === 0) {
+      throw new PersonalModelProviderError(
+        "LOCAL_OPERATION_FAILED",
+        "The local Personal Model operation did not apply a correction.",
+        { status: 409 },
+      );
+    }
+
+    let after;
+    try {
+      after = await this.getSnapshot(modelId, grant, options);
+    } catch {
+      throw correctionVerificationError();
+    }
+    const beforeEntries = prioritizedConclusionEntries(before);
+    const afterEntries = prioritizedConclusionEntries(after);
+    const beforeConclusions = new Set(
+      beforeEntries.map(({ normalized }) => normalized),
+    );
+    const afterConclusions = new Set(
+      afterEntries.map(({ normalized }) => normalized),
+    );
+    let affected = affectedConclusions(result, request);
+    if (affected.length === 0) {
+      // Pinned Persome 0.3.2 returns {kind, applied, reason, ok}. Reconstruct
+      // affected visible conclusions from two independently validated reads.
+      affected = deriveAffectedConclusions(beforeEntries, afterConclusions);
+    }
+    if (
+      affected.length === 0 ||
+      affected.some(
+        ({ reference }) =>
+          typeof reference === "string" &&
+          !reference.startsWith(`${modelId}:`),
+      )
+    ) {
+      throw correctionVerificationError();
+    }
+    if (
+      affected.some(({ previousConclusion }) => {
+        const oldConclusion = normalizeConclusion(previousConclusion);
+        return (
+          !beforeConclusions.has(oldConclusion) ||
+          afterConclusions.has(oldConclusion)
+        );
+      })
+    ) {
+      throw correctionVerificationError();
+    }
+
+    const receipt = runtimeReceipt ?? productCorrectionReceipt({
+      modelId,
+      request,
+      result,
+      before,
+      after,
+      affected,
+    });
+
+    return parsePersonalModelCorrectionResponse({
+      modelId,
+      status: "applied",
+      receipt,
+      receiptSource: runtimeReceipt ? "runtime" : "product",
+      affected: affected.map((entry) => ({
+        ...entry,
+        state: "deprioritized",
+      })),
+      verification: {
+        status: "verified",
+        refreshed: true,
+        oldConclusionDeprioritized: true,
+        previousUpdatedAt: before.personalModel.updatedAt,
+        updatedAt: after.personalModel.updatedAt,
+      },
+    });
   }
 }

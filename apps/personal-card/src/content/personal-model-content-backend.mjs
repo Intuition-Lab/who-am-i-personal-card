@@ -510,17 +510,80 @@ export class LocalPersomeContentBackend {
       }
     }
     const publicResult = publicSearchResult(cached);
+    const resolvedKind = String(resolved?.kind || cached.kind || "unknown");
+    const resolvedStatus = String(resolved?.status || "available");
+    const timestamp = cleanText(
+      resolved?.metadata?.occurred_at
+        ?? resolved?.timestamp
+        ?? cached.source?.timestamp,
+      128,
+    );
+    const originalTime = Number.isFinite(Date.parse(timestamp))
+      ? new Date(timestamp).toISOString()
+      : null;
+    const originalType = resolvedKind === "memory"
+      ? "persome-memory"
+      : ["activity", "capture"].includes(resolvedKind)
+        ? "persome-activity"
+        : null;
+    const originalAvailable = Boolean(
+      rawId
+      && originalType
+      && originalTime
+      && !["missing", "metadata_only"].includes(resolvedStatus),
+    );
+    const summary = cleanText(
+      resolved?.summary ?? publicResult.body ?? publicResult.text,
+    );
+    const runtimeEvidence = resolved && typeof resolved === "object"
+      ? {
+          runtimeReceipt:
+            resolved.canonical_reference || resolved.reference || rawId,
+          kind: resolvedKind,
+          status: resolvedStatus,
+          summary: cleanText(resolved.summary),
+          path: cleanText(resolved.path, 1024) || null,
+          metadata:
+            resolved.metadata && typeof resolved.metadata === "object"
+              ? resolved.metadata
+              : {},
+        }
+      : null;
     return {
       modelId,
       reference,
+      source: {
+        type: originalAvailable ? originalType : "derived-summary",
+        originalTime: originalAvailable ? originalTime : null,
+        application: cleanText(
+          resolved?.metadata?.app_name
+            ?? resolved?.metadata?.source_kind
+            ?? "Persome",
+          240,
+        ) || null,
+        title: publicResult.title || resolved?.label || null,
+        ...(rawId ? { recordId: rawId } : {}),
+      },
+      supports: summary
+        ? [{
+            claim: summary,
+            relationship: originalAvailable ? "direct" : "indirect",
+          }]
+        : [],
+      availability: originalAvailable
+        ? { status: "available" }
+        : {
+            status: "unavailable",
+            reason: "original-source-unavailable",
+          },
       content: {
         kind: "memory",
         ...publicResult,
-        resolved,
+        resolved: runtimeEvidence,
       },
       ...(rawId ? { receipt: rawId } : {}),
-      ...(Number.isFinite(Date.parse(cached.source?.timestamp))
-        ? { capturedAt: new Date(cached.source.timestamp).toISOString() }
+      ...(originalTime
+        ? { capturedAt: originalTime }
         : {}),
     };
   }
