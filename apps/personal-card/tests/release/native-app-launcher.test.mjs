@@ -44,6 +44,8 @@ test("production installs a native SwiftUI app with an embedded backend", async 
   assert.match(swiftSource, /NSStatusBar\.system\.statusItem/);
   assert.match(swiftSource, /positionSpotlightPanel/);
   assert.match(swiftSource, /statusButton\.convert/);
+  assert.match(swiftSource, /visibleFrame\.height - verticalMargin \* 2/);
+  assert.match(swiftSource, /window\.setContentSize\(targetSize\)/);
   assert.match(swiftSource, /isMovableByWindowBackground = false/);
   assert.match(swiftSource, /showSearchFromStatusItem/);
   assert.match(swiftSource, /showAskFromStatusItem/);
@@ -75,6 +77,11 @@ test("production installs a native SwiftUI app with an embedded backend", async 
   }
   assert.match(nativeUI, /Bundle\.main\.resourceURL/);
   assert.match(nativeUI, /appendingPathComponent\("AppIcons"/);
+  assert.match(nativeUI, /WHOAMI_VISUAL_QA_ACTIVE/);
+  assert.match(swiftSource, /whoAmIVisualQAActive/);
+  assert.match(nativeUI, /onContinuousHover/);
+  assert.match(nativeUI, /func openRewind\(dayID:/);
+  assert.match(nativeUI, /state\.openRewind\(dayID: item\.dayId\)/);
   assert.match(swiftSource, /installAndOpenNativeApp/);
   assert.match(swiftSource, /Install Who Am I\.command/);
   assert.match(swiftSource, /Applications.*Who Am I\.app/s);
@@ -100,6 +107,7 @@ test("native app preserves the original V5 interaction surfaces without a WebVie
     "NativeMonthCalendar",
     "NativeRewindTelevision",
     "NativeMemorySky",
+    "NativeConstellationTheme",
     "NativeCorrectionToast",
     "NativeConnectorDock",
     "NativeConnectorSwipe",
@@ -127,6 +135,7 @@ test("native app preserves the original V5 interaction surfaces without a WebVie
     "ROOT · 今天留下的一句",
     "ROOT · 我是谁",
     "← → 巡星",
+    "亮星可点 · ← → 巡星 · 点星座名查看模型推断",
     "SAME MODEL · PRIVATE INSIDE / PUBLIC OUTSIDE",
     "划线分享",
     "打开 Evidence",
@@ -134,6 +143,8 @@ test("native app preserves the original V5 interaction surfaces without a WebVie
     assert.match(nativeUI, new RegExp(detail));
   }
   assert.doesNotMatch(nativeUI, /WKWebView|WebKit/);
+  assert.match(nativeUI, /state\.isMemorySkyOpen[\s\S]*accessibilityHidden/);
+  assert.match(nativeUI, /onExitCommand/);
   assert.match(nativeUI, /frame\(width: 430, height: 430 \/ 1\.586\)/);
   assert.match(nativeUI, /\(28, 40, 16, 34\)/);
   assert.match(nativeUI, /\(66, 56, 14, 26\)/);

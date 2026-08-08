@@ -3,6 +3,9 @@ import Foundation
 import SwiftUI
 
 let whoAmIVisualQAOpaque = ProcessInfo.processInfo.environment["WHOAMI_VISUAL_QA_OPAQUE"] == "1"
+let whoAmIVisualQAActive =
+    ProcessInfo.processInfo.environment["WHOAMI_VISUAL_QA_ACTIVE"] == "1"
+    || whoAmIVisualQAOpaque
 
 enum WhoAmISection: String, CaseIterable, Identifiable {
     case card = "Card"
@@ -594,6 +597,7 @@ final class PersonalModelAppState: ObservableObject {
     @Published var isShareOpen = false
     @Published var isMemorySkyOpen = false
     @Published var isConnectorDockOpen = false
+    @Published var rewindDayRequest: String?
     @Published var shareHighlight: String?
     @Published private(set) var snapshot: PersonalModelSnapshot?
     @Published private(set) var setupState = "loading"
@@ -675,6 +679,11 @@ final class PersonalModelAppState: ObservableObject {
 
     var hasEvidencePresentation: Bool {
         evidencePhase == .loading || evidencePhase == .failure || selectedEvidence != nil
+    }
+
+    func openRewind(dayID: String?) {
+        rewindDayRequest = dayID?.trimmedNonEmpty
+        selectedSection = .rewind
     }
 
     func load() async {
@@ -1032,6 +1041,16 @@ struct WhoAmIRootView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .allowsHitTesting(
+                !state.isMemorySkyOpen
+                    && !state.isShareOpen
+                    && !state.hasEvidencePresentation
+            )
+            .accessibilityHidden(
+                state.isMemorySkyOpen
+                    || state.isShareOpen
+                    || state.hasEvidencePresentation
+            )
             if state.selectedSection != .card && !state.isShareOpen && !state.isMemorySkyOpen {
                 NativeReturnToCard(state: state)
                     .frame(maxHeight: .infinity, alignment: .bottom)
@@ -1404,6 +1423,7 @@ private struct NativeHeroCard: View {
     let snapshot: PersonalModelSnapshot
     @State private var flipped = false
     @State private var drag = CGSize.zero
+    @State private var hoverLocation: CGPoint?
     @State private var correction = ""
     @State private var selectedFaceID: String?
     @State private var rootSelected = false
@@ -1452,6 +1472,24 @@ private struct NativeHeroCard: View {
             }
         }
         return stars
+    }
+
+    private var hoverTiltX: Double {
+        guard let hoverLocation else { return 0 }
+        return (0.5 - hoverLocation.y / (430 / 1.586)) * 5
+    }
+
+    private var hoverTiltY: Double {
+        guard let hoverLocation else { return 0 }
+        return (hoverLocation.x / 430 - 0.5) * 6
+    }
+
+    private var glareCenter: UnitPoint {
+        guard let hoverLocation else { return UnitPoint(x: 0.3, y: 0.2) }
+        return UnitPoint(
+            x: min(1, max(0, hoverLocation.x / 430)),
+            y: min(1, max(0, hoverLocation.y / (430 / 1.586)))
+        )
     }
 
     private var cardLocator: String {
@@ -1532,13 +1570,25 @@ private struct NativeHeroCard: View {
             y: 25
         )
         .rotation3DEffect(
-            .degrees(Double(drag.width / 45)),
+            .degrees(Double(drag.width / 45) + hoverTiltY),
             axis: (x: -drag.height / 80, y: 1, z: 0),
+            perspective: 0.45
+        )
+        .rotation3DEffect(
+            .degrees(hoverTiltX),
+            axis: (x: 1, y: 0, z: 0),
             perspective: 0.45
         )
         .offset(x: drag.width * 0.08, y: drag.height * 0.04)
         .animation(.spring(response: 0.46, dampingFraction: 0.82), value: flipped)
         .animation(.interactiveSpring(), value: drag)
+        .animation(.easeOut(duration: 0.18), value: hoverLocation)
+        .onContinuousHover { phase in
+            switch phase {
+            case .active(let point): hoverLocation = point
+            case .ended: hoverLocation = nil
+            }
+        }
         .focusable()
         .onMoveCommand { direction in
             guard flipped else { return }
@@ -1556,8 +1606,6 @@ private struct NativeHeroCard: View {
                 break
             }
         }
-        .accessibilityLabel("\(snapshot.model.displayName) Personal Model Card")
-        .accessibilityHint("按空格、点击或横向滑动翻转 Card")
     }
 
     private var front: some View {
@@ -1603,31 +1651,53 @@ private struct NativeHeroCard: View {
                     .foregroundStyle(material.name)
                     .shadow(color: .white.opacity(0.16), radius: 7)
             }
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(
+                    RadialGradient(
+                        colors: [.white.opacity(0.13), .clear],
+                        center: glareCenter,
+                        startRadius: 0,
+                        endRadius: 230
+                    )
+                )
+                .opacity(hoverLocation == nil ? 0 : 1)
+                .allowsHitTesting(false)
         }
         .padding(.horizontal, 30)
         .padding(.vertical, 24)
         .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .onTapGesture { flipped = true }
         .simultaneousGesture(cardGesture)
+        .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { flipped = true }
-        .accessibilityLabel("翻转 \(snapshot.model.displayName) 的 Card")
-        .accessibilityHint("显示模型依据、更正与复制操作")
+        .accessibilityLabel("\(snapshot.model.displayName) Personal Model Card")
+        .accessibilityHint("按空格、点击或横向滑动翻转 Card")
     }
 
     private var back: some View {
         GeometryReader { proxy in
             ZStack {
-                ForEach(cardStars.filter { !$0.isBright }) { star in
-                    Circle()
-                        .fill(material.detail.opacity(star.opacity))
-                        .frame(width: star.size, height: star.size)
-                        .position(
-                            x: proxy.size.width * star.x / 100,
-                            y: proxy.size.height * star.y / 100
+                Canvas { context, size in
+                    for star in cardStars where !star.isBright {
+                        let point = CGPoint(
+                            x: size.width * star.x / 100,
+                            y: size.height * star.y / 100
                         )
-                        .accessibilityHidden(true)
+                        let rect = CGRect(
+                            x: point.x - star.size / 2,
+                            y: point.y - star.size / 2,
+                            width: star.size,
+                            height: star.size
+                        )
+                        context.fill(
+                            Path(ellipseIn: rect),
+                            with: .color(material.detail.opacity(star.opacity))
+                        )
+                    }
                 }
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
                 let faces = snapshot.personalModel?.faces ?? []
                 ForEach(cardStars.filter(\.isBright)) { star in
                     let face = faces.isEmpty ? nil : faces[star.id % faces.count]
@@ -2029,8 +2099,8 @@ private struct NativeNowPanel: View {
                     )
                 } else {
                     ForEach(visibleNowItems) { item in
-                        NativeNowRow(item: item) { reference in
-                            Task { await state.loadEvidence(reference) }
+                        NativeNowRow(item: item) {
+                            state.openRewind(dayID: item.dayId)
                         }
                         Divider().padding(.leading, 20)
                     }
@@ -2434,317 +2504,666 @@ private enum NativeSkyMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-private struct NativeSkyStar: Identifiable {
-    let id: String
-    let title: String
-    let detail: String
-    let reference: String?
-    let source: String
+private struct NativeConstellationTheme: Identifiable {
+    let id: Int
+    let face: FaceSnapshot
     let x: CGFloat
     let y: CGFloat
-    let strength: CGFloat
+    let size: Int
+    let color: Color
+}
+
+private struct NativeConstellationStar: Identifiable {
+    let id: String
+    let themeIndex: Int?
+    let title: String
+    let detail: String
+    let source: String
+    let reference: String?
+    let x: CGFloat
+    let y: CGFloat
+    let timeX: CGFloat
+    let timeY: CGFloat
+    let age: CGFloat
+    let isBright: Bool
+    let isBig: Bool
+    let isAmbient: Bool
 }
 
 private struct NativeMemorySky: View {
     @ObservedObject var state: PersonalModelAppState
     let snapshot: PersonalModelSnapshot
     @State private var mode: NativeSkyMode = .constellation
-    @State private var selectedStar: NativeSkyStar?
+    @State private var selectedStar: NativeConstellationStar?
     @State private var threeD = false
     @State private var skyTilt = CGSize.zero
     @State private var skyCorrection = ""
 
-    private var stars: [NativeSkyStar] {
-        var output: [NativeSkyStar] = []
-        for face in snapshot.personalModel?.faces ?? [] {
-            output.append(
-                NativeSkyStar(
-                    id: "face:\(face.id)",
-                    title: "Personal Model 推断",
-                    detail: face.text,
-                    reference: face.evidenceRefs?.first,
-                    source: face.source ?? "Personal Model",
-                    x: 0.12 + stableUnit(face.id, salt: 17) * 0.76,
-                    y: 0.15 + stableUnit(face.id, salt: 43) * 0.64,
-                    strength: 4 + CGFloat(min(8, max(0, face.observations ?? 1))) * 0.55
-                )
+    private let positions: [(CGFloat, CGFloat)] = [
+        (0.38, 0.42),
+        (0.68, 0.24),
+        (0.67, 0.66),
+        (0.22, 0.24),
+        (0.18, 0.64),
+        (0.85, 0.46),
+    ]
+
+    private let themeColors: [Color] = [
+        Color(red: 0.42, green: 0.45, blue: 0.58),
+        Color(red: 0.40, green: 0.50, blue: 0.45),
+        Color(red: 0.55, green: 0.42, blue: 0.35),
+        Color(red: 0.32, green: 0.33, blue: 0.36),
+        Color(red: 0.44, green: 0.39, blue: 0.53),
+        Color(red: 0.43, green: 0.50, blue: 0.58),
+    ]
+
+    private var themes: [NativeConstellationTheme] {
+        Array((snapshot.personalModel?.faces ?? []).prefix(6).enumerated()).map {
+            index, face in
+            NativeConstellationTheme(
+                id: index,
+                face: face,
+                x: positions[index].0,
+                y: positions[index].1,
+                size: max(4, 16 - index * 2),
+                color: themeColors[index]
             )
         }
-        for day in snapshot.time?.days ?? [] {
-            for event in day.events ?? [] where event.evidenceRef != nil {
+    }
+
+    private var skyStars: [NativeConstellationStar] {
+        var output: [NativeConstellationStar] = []
+        for theme in themes {
+            for index in 0..<theme.size {
+                let angle = (Double(index) * 137.5 + Double(theme.id) * 61)
+                    * .pi / 180
+                let hash = (Int64(index) * 2_654_435_761) % 97
+                let radius = CGFloat(theme.id == 0 ? 0.13 : 0.09)
+                    * sqrt(CGFloat(hash) / 97)
+                let age = CGFloat((index * 5 + theme.id * 3) % 28)
+                let timeAngle = CGFloat((index * 89 + theme.id * 137) % 360)
+                    * .pi / 180
+                let timeRadius = 0.07 + age / 28 * 0.34
+                let bright = index == 0 || index % 4 == 1
                 output.append(
-                    NativeSkyStar(
-                        id: "event:\(day.id):\(event.id)",
-                        title: event.title,
-                        detail: [event.time, event.app, event.detail]
-                            .compactMap { $0?.trimmedNonEmpty }
-                            .joined(separator: " · "),
-                        reference: event.evidenceRef,
-                        source: event.source ?? event.app ?? "Rewind",
-                        x: 0.10 + stableUnit("\(day.id):\(event.id)", salt: 71) * 0.80,
-                        y: 0.13 + stableUnit("\(day.id):\(event.id)", salt: 97) * 0.70,
-                        strength: 3.2
+                    NativeConstellationStar(
+                        id: "theme:\(theme.id):\(index)",
+                        themeIndex: theme.id,
+                        title: "Personal Model 推断",
+                        detail: theme.face.text,
+                        source: theme.face.source ?? "Personal Model",
+                        reference: bright ? theme.face.evidenceRefs?.first : nil,
+                        x: theme.x + cos(angle) * radius,
+                        y: theme.y + sin(angle) * radius * 0.85,
+                        timeX: 0.5 + cos(timeAngle) * timeRadius,
+                        timeY: 0.46 + sin(timeAngle) * timeRadius * 0.8,
+                        age: age,
+                        isBright: bright,
+                        isBig: index == 0,
+                        isAmbient: false
                     )
                 )
             }
         }
+        for index in 0..<18 {
+            output.append(
+                NativeConstellationStar(
+                    id: "ambient:\(index)",
+                    themeIndex: nil,
+                    title: "",
+                    detail: "",
+                    source: "",
+                    reference: nil,
+                    x: CGFloat((index * 137) % 99) / 100 + 0.005,
+                    y: CGFloat((index * 71) % 92) / 100 + 0.04,
+                    timeX: CGFloat((index * 137) % 99) / 100 + 0.005,
+                    timeY: CGFloat((index * 71) % 92) / 100 + 0.04,
+                    age: 20,
+                    isBright: false,
+                    isBig: false,
+                    isAmbient: true
+                )
+            )
+        }
         return output
     }
 
-    private var visibleStars: [NativeSkyStar] {
-        switch mode {
-        case .constellation: return stars
-        case .dust: return stars
-        case .time: return Array(stars.reversed())
-        }
-    }
-
-    private var rootStar: NativeSkyStar {
-        NativeSkyStar(
+    private var rootStar: NativeConstellationStar {
+        NativeConstellationStar(
             id: "root",
+            themeIndex: nil,
             title: "ROOT · 我是谁",
-            detail: snapshot.personalModel?.root?.trimmedNonEmpty ?? "Personal Model 正在形成对你的长期理解。",
-            reference: nil,
+            detail: snapshot.personalModel?.root?.trimmedNonEmpty
+                ?? "Personal Model 正在形成对你的长期理解。",
             source: "Personal Model · 当前快照",
+            reference: nil,
             x: 0.5,
-            y: 0.46,
-            strength: 9
+            y: 0.45,
+            timeX: 0.5,
+            timeY: 0.46,
+            age: 0,
+            isBright: true,
+            isBig: true,
+            isAmbient: false
         )
     }
 
-    private func position(for star: NativeSkyStar, index: Int, in size: CGSize) -> CGPoint {
-        guard mode == .time else {
-            return CGPoint(x: star.x * size.width, y: star.y * size.height)
-        }
-        let count = max(1, visibleStars.count)
-        let progress = CGFloat(index + 1) / CGFloat(count)
-        let angle = stableUnit(star.id, salt: 211) * .pi * 2
-        let radius = min(size.width, size.height) * (0.08 + 0.37 * sqrt(progress))
-        return CGPoint(
-            x: size.width * 0.5 + cos(angle) * radius,
-            y: size.height * 0.46 + sin(angle) * radius * 0.78
-        )
-    }
+    private var focusedThemeIndex: Int? { selectedStar?.themeIndex }
 
     private var legend: String {
         switch mode {
         case .constellation:
             return "星 = 记忆段 · 线 = 同一件事 · 星座 = 主题"
         case .dust:
-            return "只看密度 — 哪里亮，日子就长在哪里"
+            return "只看密度 — 颜色是主题，哪里亮，日子就长在哪里"
         case .time:
             return "由内向外 = 从最近到更早 · 新记忆亮，旧记忆暗"
         }
+    }
+
+    private var memoryCountLabel: String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter.string(from: NSNumber(value: snapshot.personalModel?.memoryCount ?? 0))
+            ?? "0"
+    }
+
+    private var liveLabel: String {
+        snapshot.model.status?.lowercased() == "online"
+            ? "LIVE · 本机模型"
+            : "本机模型"
+    }
+
+    private func position(
+        for star: NativeConstellationStar,
+        in size: CGSize
+    ) -> CGPoint {
+        let x = mode == .time ? star.timeX : star.x
+        let y = mode == .time ? star.timeY : star.y
+        return CGPoint(x: x * size.width, y: y * size.height)
+    }
+
+    private func color(for star: NativeConstellationStar) -> Color {
+        guard let index = star.themeIndex, themes.indices.contains(index) else {
+            return Color(red: 0.92, green: 0.93, blue: 0.98)
+        }
+        return themes[index].color
+    }
+
+    private func opacity(for star: NativeConstellationStar) -> Double {
+        guard
+            let focusedThemeIndex,
+            let starTheme = star.themeIndex,
+            focusedThemeIndex != starTheme
+        else { return 1 }
+        return 0.16
     }
 
     var body: some View {
         GeometryReader { proxy in
             ZStack {
                 RadialGradient(
-                    colors: [Color(red: 0.09, green: 0.10, blue: 0.16), Color(red: 0.025, green: 0.025, blue: 0.04)],
-                    center: .center,
-                    startRadius: 10,
-                    endRadius: max(proxy.size.width, proxy.size.height) * 0.78
+                    colors: [
+                        Color(red: 0.082, green: 0.082, blue: 0.106),
+                        Color(red: 0.031, green: 0.031, blue: 0.043),
+                    ],
+                    center: UnitPoint(x: 0.5, y: 0),
+                    startRadius: 0,
+                    endRadius: max(proxy.size.width, proxy.size.height) * 1.1
                 )
-                .ignoresSafeArea()
-                ForEach(0..<6, id: \.self) { index in
-                    Circle()
-                        .fill(Color.indigo.opacity(0.035))
-                        .frame(width: 190 + CGFloat(index * 34), height: 110 + CGFloat(index * 26))
-                        .blur(radius: 34)
-                        .position(
-                            x: stableUnit("mist-\(index)", salt: 11) * proxy.size.width,
-                            y: stableUnit("mist-\(index)", salt: 29) * proxy.size.height
-                        )
-                        .accessibilityHidden(true)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    selectedStar = nil
+                    skyCorrection = ""
                 }
-                ZStack {
-                    Canvas { context, size in
-                        guard mode == .constellation else { return }
-                        let center = CGPoint(x: size.width * 0.5, y: size.height * 0.46)
-                        for (index, star) in visibleStars.prefix(32).enumerated() {
-                            var path = Path()
-                            path.move(to: center)
-                            path.addLine(to: position(for: star, index: index, in: size))
-                            context.stroke(path, with: .color(.white.opacity(0.055)), lineWidth: 0.7)
-                        }
-                    }
-                    ForEach(Array(visibleStars.enumerated()), id: \.element.id) { index, star in
-                        Button {
-                            withAnimation(.easeOut(duration: 0.2)) { selectedStar = star }
-                        } label: {
-                            Circle()
-                                .fill(star.reference == nil ? Color.white.opacity(0.54) : Color.white)
-                                .frame(width: star.strength, height: star.strength)
-                                .shadow(
-                                    color: star.reference == nil ? .clear : Color.blue.opacity(0.72),
-                                    radius: star.strength * 1.3
-                                )
-                                .contentShape(Circle().inset(by: -8))
-                        }
-                        .buttonStyle(.plain)
-                        .position(position(for: star, index: index, in: proxy.size))
-                        .accessibilityLabel("\(star.title)：\(star.detail)")
-                    }
-                    Button {
-                        withAnimation(.easeOut(duration: 0.2)) { selectedStar = rootStar }
-                    } label: {
-                        Circle()
+
+                RadialGradient(
+                    colors: [
+                        Color(red: 0.47, green: 0.55, blue: 0.86).opacity(0.07),
+                        .clear,
+                    ],
+                    center: UnitPoint(x: 0.5, y: 0.42),
+                    startRadius: 0,
+                    endRadius: min(proxy.size.width, proxy.size.height) * 0.70
+                )
+                .allowsHitTesting(false)
+
+                if mode != .time {
+                    ForEach(themes) { theme in
+                        Ellipse()
                             .fill(
                                 RadialGradient(
-                                    colors: [.white, .blue.opacity(0.82), .clear],
+                                    colors: [theme.color.opacity(0.13), .clear],
                                     center: .center,
-                                    startRadius: 1,
-                                    endRadius: 15
+                                    startRadius: 0,
+                                    endRadius: 100
                                 )
                             )
-                            .frame(width: 30, height: 30)
-                            .overlay(Circle().stroke(.white.opacity(0.18)))
-                            .shadow(color: .blue.opacity(0.52), radius: 15)
+                            .frame(
+                                width: CGFloat(theme.size) * 14 + 90,
+                                height: CGFloat(theme.size) * 10 + 70
+                            )
+                            .blur(radius: 6)
+                            .position(
+                                x: theme.x * proxy.size.width,
+                                y: theme.y * proxy.size.height
+                            )
+                            .allowsHitTesting(false)
                     }
-                    .buttonStyle(.plain)
-                    .position(x: proxy.size.width * 0.5, y: proxy.size.height * 0.46)
-                    .accessibilityLabel("ROOT · 我是谁")
                 }
-                .rotation3DEffect(
-                    .degrees(threeD ? Double(skyTilt.height / 12) : 0),
-                    axis: (x: 1, y: 0, z: 0),
-                    perspective: 0.45
-                )
-                .rotation3DEffect(
-                    .degrees(threeD ? Double(-skyTilt.width / 12) : 0),
-                    axis: (x: 0, y: 1, z: 0),
-                    perspective: 0.45
-                )
-                .gesture(
-                    DragGesture()
-                        .onChanged { value in if threeD { skyTilt = value.translation } }
-                        .onEnded { _ in
-                            withAnimation(.spring(response: 0.4)) { skyTilt = .zero }
-                        }
-                )
-                VStack {
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("MEMORY SKY")
-                                .font(.caption2.monospaced())
-                                .tracking(2.4)
-                            Text("\(snapshot.personalModel?.memoryCount ?? 0) memories · \(visibleStars.count) visible stars")
-                                .font(.caption2)
-                        }
-                        .foregroundStyle(.white.opacity(0.48))
+
+                constellation(in: proxy.size)
+                    .rotation3DEffect(
+                        .degrees(threeD ? Double(skyTilt.height / 12) : 0),
+                        axis: (x: 1, y: 0, z: 0),
+                        perspective: 0.45
+                    )
+                    .rotation3DEffect(
+                        .degrees(threeD ? Double(-skyTilt.width / 12) : 0),
+                        axis: (x: 0, y: 1, z: 0),
+                        perspective: 0.45
+                    )
+                    .gesture(
+                        DragGesture()
+                            .onChanged { value in
+                                if threeD { skyTilt = value.translation }
+                            }
+                            .onEnded { _ in
+                                withAnimation(.spring(response: 0.4)) { skyTilt = .zero }
+                            }
+                    )
+
+                topControls
+
+                footer
+
+                if let selectedStar {
+                    VStack {
                         Spacer()
-                        Picker("Memory Sky mode", selection: $mode) {
-                            ForEach(NativeSkyMode.allCases) { mode in Text(mode.rawValue).tag(mode) }
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 210)
-                        Button(threeD ? "2D" : "3D ⤢") {
-                            withAnimation(.spring(response: 0.35)) {
-                                threeD.toggle()
-                                skyTilt = .zero
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        Button {
-                            withAnimation(.easeOut(duration: 0.2)) { state.isMemorySkyOpen = false }
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.title3)
-                                .foregroundStyle(.white.opacity(0.52))
-                        }
-                        .buttonStyle(.plain)
-                        .keyboardShortcut(.cancelAction)
-                        .accessibilityLabel("关闭 Memory Sky")
-                    }
-                    Spacer()
-                    if let selectedStar {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Text(selectedStar.title)
-                                    .font(.caption2.monospaced())
-                                    .tracking(1.7)
-                                    .foregroundStyle(.white.opacity(0.45))
-                                Spacer()
-                                Button {
-                                    withAnimation(.easeOut(duration: 0.15)) { self.selectedStar = nil }
-                                } label: { Image(systemName: "xmark") }
-                                    .buttonStyle(.plain)
-                            }
-                            Text(selectedStar.detail)
-                                .font(.system(size: 15, design: .serif))
-                                .lineSpacing(5)
-                                .foregroundStyle(.white.opacity(0.9))
-                            HStack {
-                                Text(selectedStar.source)
-                                    .font(.caption2.monospaced())
-                                    .foregroundStyle(.white.opacity(0.42))
-                                Spacer()
-                                if let reference = selectedStar.reference {
-                                    Button("出处") { Task { await state.loadEvidence(reference) } }
-                                } else {
-                                    Text("尚无可核验 Evidence")
-                                        .font(.caption2)
-                                        .foregroundStyle(.orange.opacity(0.85))
-                                }
-                                Button("改写") { skyCorrection = selectedStar.detail }
-                                Button("行动") {
-                                    state.isMemorySkyOpen = false
-                                    state.selectedSection = .connectors
-                                }
-                                Button("分享 ↗") { state.openShare(highlight: selectedStar.detail) }
-                            }
-                            .buttonStyle(.borderless)
-                            if !skyCorrection.isEmpty {
-                                HStack(spacing: 8) {
-                                    TextField("不对的话，改写它", text: $skyCorrection)
-                                        .textFieldStyle(.plain)
-                                        .foregroundStyle(.white)
-                                        .onSubmit { Task { await state.correct(skyCorrection) } }
-                                    Button(state.isCorrecting ? "写入中…" : "写入") {
-                                        Task { await state.correct(skyCorrection) }
-                                    }
-                                    .disabled(state.isCorrecting)
-                                }
-                                .padding(.horizontal, 10)
-                                .frame(height: 30)
-                                .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
-                            }
-                        }
-                        .padding(17)
-                        .frame(maxWidth: 500)
-                        .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 14))
-                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.12)))
-                    } else {
-                        VStack(spacing: 5) {
-                            Text(legend)
-                            Text("亮星可点 · Evidence 只来自当前 Personal Model")
-                        }
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.white.opacity(0.34))
+                        starPanel(selectedStar)
+                            .frame(width: min(480, proxy.size.width * 0.88))
+                            .padding(.bottom, 52)
                     }
                 }
-                .padding(22)
+
+                VStack {
+                    Spacer()
+                    returnToCard.padding(.bottom, 18)
+                }
             }
         }
+        .ignoresSafeArea()
         .focusable()
-        .onMoveCommand { direction in
-            let stars = visibleStars
-            guard !stars.isEmpty else { return }
-            let currentIndex = selectedStar.flatMap { selected in
-                stars.firstIndex(where: { $0.id == selected.id })
-            } ?? -1
-            switch direction {
-            case .left, .up:
-                selectedStar = stars[(currentIndex - 1 + stars.count) % stars.count]
-            case .right, .down:
-                selectedStar = stars[(currentIndex + 1) % stars.count]
-            default:
-                break
-            }
+        .onMoveCommand(perform: moveSelection)
+        .onExitCommand {
+            withAnimation(.easeOut(duration: 0.2)) { state.isMemorySkyOpen = false }
         }
         .accessibilityElement(children: .contain)
+    }
+
+    private func constellation(in size: CGSize) -> some View {
+        ZStack {
+            Canvas { context, canvasSize in
+                guard mode == .constellation else { return }
+                let root = CGPoint(x: canvasSize.width * 0.5, y: canvasSize.height * 0.45)
+                for theme in themes {
+                    let hubs = skyStars.filter {
+                        $0.themeIndex == theme.id && $0.isBright
+                    }.prefix(5)
+                    var previous = root
+                    for (index, hub) in hubs.enumerated() {
+                        let point = position(for: hub, in: canvasSize)
+                        var path = Path()
+                        path.move(to: previous)
+                        path.addLine(to: point)
+                        let isFocused = focusedThemeIndex == theme.id
+                        let isDimmed = focusedThemeIndex != nil && !isFocused
+                        context.stroke(
+                            path,
+                            with: .color(
+                                theme.color.opacity(
+                                    isDimmed ? 0.05 : isFocused ? 0.85 : 0.30
+                                )
+                            ),
+                            lineWidth: index == 0 ? 0.65 : isFocused ? 1.35 : 0.82
+                        )
+                        previous = point
+                    }
+                }
+            }
+
+            ForEach(skyStars) { star in
+                skyStar(star)
+                    .position(position(for: star, in: size))
+                    .opacity(opacity(for: star))
+                    .animation(.easeInOut(duration: 0.65), value: mode)
+                    .animation(.easeOut(duration: 0.28), value: selectedStar?.id)
+            }
+
+            Button {
+                selectedStar = rootStar
+                skyCorrection = ""
+            } label: {
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                .white,
+                                Color(red: 0.78, green: 0.82, blue: 1.0).opacity(0.50),
+                                Color(red: 0.78, green: 0.82, blue: 1.0).opacity(0.14),
+                                .clear,
+                            ],
+                            center: .center,
+                            startRadius: 1,
+                            endRadius: 14
+                        )
+                    )
+                    .frame(width: 30, height: 30)
+                    .shadow(
+                        color: selectedStar?.id == "root"
+                            ? Color(red: 0.78, green: 0.82, blue: 1.0).opacity(0.40)
+                            : .clear,
+                        radius: 12
+                    )
+            }
+            .buttonStyle(.plain)
+            .position(
+                x: size.width * 0.5,
+                y: size.height * (mode == .time ? 0.46 : 0.45)
+            )
+            .accessibilityLabel("ROOT · 我是谁")
+
+            if mode == .constellation {
+                ForEach(themes) { theme in
+                    Button {
+                        selectedStar = skyStars.first {
+                            $0.themeIndex == theme.id && $0.isBright
+                        }
+                        skyCorrection = ""
+                    } label: {
+                        VStack(spacing: 2) {
+                            Text(theme.face.text)
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(theme.color)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.center)
+                                .shadow(color: .black.opacity(0.9), radius: 5, y: 1)
+                            Text("\(theme.face.observations ?? 0) observations")
+                                .font(.system(size: 8.5, design: .monospaced))
+                                .tracking(0.7)
+                                .foregroundStyle(.white.opacity(0.45))
+                        }
+                        .frame(width: 260)
+                    }
+                    .buttonStyle(.plain)
+                    .position(
+                        x: theme.x * size.width,
+                        y: (theme.y - (theme.id == 0 ? 0.17 : 0.12)) * size.height
+                    )
+                    .opacity(
+                        focusedThemeIndex == nil || focusedThemeIndex == theme.id
+                            ? 1
+                            : 0.15
+                    )
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func skyStar(_ star: NativeConstellationStar) -> some View {
+        let tint = color(for: star)
+        if star.isBright {
+            Button {
+                selectedStar = star
+                skyCorrection = ""
+            } label: {
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            stops: [
+                                .init(color: tint.opacity(0.96 - Double(star.age / 80)), location: 0.16),
+                                .init(color: tint.opacity(0.42), location: 0.30),
+                                .init(color: tint.opacity(0.10), location: 0.62),
+                                .init(color: .clear, location: 1),
+                            ],
+                            center: .center,
+                            startRadius: 0,
+                            endRadius: 11
+                        )
+                    )
+                    .frame(width: 22, height: 22)
+                    .overlay {
+                        if selectedStar?.id == star.id {
+                            Circle().stroke(tint.opacity(0.70), lineWidth: 1)
+                        }
+                    }
+                    .shadow(
+                        color: selectedStar?.id == star.id ? tint.opacity(0.40) : .clear,
+                        radius: 10
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(star.title)：\(star.detail)")
+        } else {
+            Circle()
+                .fill(
+                    tint.opacity(
+                        star.isAmbient ? 0.30 : Double(0.4 + (1 - star.age / 28) * 0.5)
+                    )
+                )
+                .frame(
+                    width: star.isAmbient ? 1.3 : 2,
+                    height: star.isAmbient ? 1.3 : 2
+                )
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var topControls: some View {
+        VStack {
+            ZStack(alignment: .top) {
+                HStack {
+                    Text("MEMORY SKY · \(memoryCountLabel) · \(liveLabel)")
+                        .font(.system(size: 9.5, design: .monospaced))
+                        .tracking(2.1)
+                        .foregroundStyle(.white.opacity(0.40))
+                    Spacer()
+                    Button(threeD ? "2D" : "3D ⤢") {
+                        withAnimation(.spring(response: 0.35)) {
+                            threeD.toggle()
+                            skyTilt = .zero
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 9.5, design: .monospaced))
+                    .tracking(2.1)
+                    .foregroundStyle(.white.opacity(0.50))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1))
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 16)
+
+                HStack(spacing: 2) {
+                    ForEach(NativeSkyMode.allCases) { candidate in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.24)) { mode = candidate }
+                        } label: {
+                            Text(candidate.rawValue)
+                                .font(.system(size: 11.5, weight: mode == candidate ? .semibold : .regular))
+                                .foregroundStyle(mode == candidate ? Color.black : Color.white.opacity(0.60))
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 5)
+                                .background(
+                                    mode == candidate ? Color.white.opacity(0.96) : .clear,
+                                    in: Capsule()
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(3)
+                .background(.white.opacity(0.07), in: Capsule())
+                .padding(.top, 14)
+            }
+            Spacer()
+        }
+        .allowsHitTesting(true)
+    }
+
+    private var footer: some View {
+        VStack {
+            Spacer()
+            HStack(alignment: .bottom) {
+                Text(legend)
+                    .foregroundStyle(.white.opacity(0.40))
+                Spacer(minLength: 170)
+                Text("亮星可点 · ← → 巡星 · 点星座名查看模型推断")
+                    .foregroundStyle(.white.opacity(0.30))
+                    .multilineTextAlignment(.trailing)
+            }
+            .font(.system(size: 9.5, design: .monospaced))
+            .tracking(0.9)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 20)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func starPanel(_ star: NativeConstellationStar) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(star.title.uppercased())
+                    .tracking(2.7)
+                Spacer()
+                Text("← → 巡星")
+                    .tracking(0.5)
+                Button("×") {
+                    selectedStar = nil
+                    skyCorrection = ""
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 13))
+            }
+            .font(.system(size: 8.5, design: .monospaced))
+            .foregroundStyle(.white.opacity(0.45))
+            .padding(.bottom, 8)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(.white.opacity(0.10)).frame(height: 1)
+            }
+
+            Text(star.detail)
+                .font(.system(size: 13.5, design: .serif))
+                .lineSpacing(6)
+                .foregroundStyle(.white.opacity(0.96))
+                .padding(.top, 11)
+                .lineLimit(5)
+
+            HStack(alignment: .firstTextBaseline, spacing: 11) {
+                Text(
+                    [star.source, star.reference]
+                        .compactMap { $0?.trimmedNonEmpty }
+                        .joined(separator: " · ")
+                )
+                .lineLimit(1)
+                Spacer()
+                if let reference = star.reference {
+                    Button("出处") { Task { await state.loadEvidence(reference) } }
+                } else {
+                    Text("尚无 Evidence")
+                        .foregroundStyle(.orange.opacity(0.82))
+                }
+                Button("改写") { skyCorrection = star.detail }
+                Button("行动") {
+                    state.isMemorySkyOpen = false
+                    state.selectedSection = .connectors
+                }
+                Button("分享 ↗") { state.openShare(highlight: star.detail) }
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 9, design: .monospaced))
+            .foregroundStyle(.white.opacity(0.45))
+            .padding(.top, 12)
+
+            if !skyCorrection.isEmpty {
+                HStack(spacing: 8) {
+                    TextField("不对的话，改写它 ⏎", text: $skyCorrection)
+                        .textFieldStyle(.plain)
+                        .foregroundStyle(.white)
+                        .onSubmit { Task { await state.correct(skyCorrection) } }
+                    Button(state.isCorrecting ? "写入中…" : "写入") {
+                        Task { await state.correct(skyCorrection) }
+                    }
+                    .disabled(state.isCorrecting)
+                }
+                .font(.system(size: 11.5))
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.white.opacity(0.14)))
+                .padding(.top, 9)
+            }
+        }
+        .padding(.horizontal, 17)
+        .padding(.vertical, 14)
+        .background(.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.12)))
+        .shadow(color: .black.opacity(0.60), radius: 28, y: 16)
+    }
+
+    private var returnToCard: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.2)) { state.isMemorySkyOpen = false }
+        } label: {
+            HStack(spacing: 9) {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(red: 0.28, green: 0.28, blue: 0.31), Color(red: 0.14, green: 0.14, blue: 0.15)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 20, height: 13)
+                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(.white.opacity(0.24), lineWidth: 0.5))
+                Text("回到卡")
+                    .font(.system(size: 12.5, weight: .medium))
+                Text("esc")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+            }
+            .foregroundStyle(.white.opacity(0.96))
+            .padding(.leading, 12)
+            .padding(.trailing, 18)
+            .padding(.vertical, 8)
+            .background(.black.opacity(0.84), in: Capsule())
+            .shadow(color: .black.opacity(0.50), radius: 17, y: 10)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("回到 Personal Card")
+    }
+
+    private func moveSelection(_ direction: MoveCommandDirection) {
+        let candidates = skyStars.filter(\.isBright)
+        guard !candidates.isEmpty else { return }
+        let current = selectedStar.flatMap { selected in
+            candidates.firstIndex(where: { $0.id == selected.id })
+        } ?? -1
+        switch direction {
+        case .left, .up:
+            selectedStar = candidates[(current - 1 + candidates.count) % candidates.count]
+        case .right, .down:
+            selectedStar = candidates[(current + 1) % candidates.count]
+        default:
+            break
+        }
+        skyCorrection = ""
     }
 }
 
@@ -2843,7 +3262,7 @@ private struct NativeSearchResultRow: View {
 
 private struct NativeNowRow: View {
     let item: NowItem
-    let openEvidence: (String) -> Void
+    let openItem: () -> Void
 
     private var kindLabel: String {
         let normalized = item.kind.lowercased()
@@ -2889,15 +3308,6 @@ private struct NativeNowRow: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                if let reference = item.allEvidenceRefs.first {
-                    Button {
-                        openEvidence(reference)
-                    } label: {
-                        Label("Evidence", systemImage: "checkmark.seal")
-                    }
-                    .buttonStyle(.borderless)
-                    .font(.caption)
-                }
             }
             Spacer()
             if !item.isFutureLike, let when = item.when?.trimmedNonEmpty {
@@ -2908,6 +3318,10 @@ private struct NativeNowRow: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: openItem)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { openItem() }
         .accessibilityElement(children: .contain)
         .accessibilityHint(
             [item.truthMetadata.kind.label, item.truthMetadata.detail]
@@ -3228,18 +3642,33 @@ private struct NativeRewindView: View {
     }
 
     var body: some View {
-        switch screen {
-        case .year:
-            rewindYear
-        case .month:
-            rewindMonth
-        case .day:
-            if let selectedDay {
-                rewindDay(selectedDay)
-            } else {
+        Group {
+            switch screen {
+            case .year:
+                rewindYear
+            case .month:
                 rewindMonth
+            case .day:
+                if let selectedDay {
+                    rewindDay(selectedDay)
+                } else {
+                    rewindMonth
+                }
             }
         }
+        .onAppear(perform: applyRequestedDay)
+        .onChange(of: state.rewindDayRequest) { _ in applyRequestedDay() }
+    }
+
+    private func applyRequestedDay() {
+        guard
+            let requested = state.rewindDayRequest,
+            days.contains(where: { $0.id == requested })
+        else { return }
+        selectedDayID = requested
+        selectedEventIndex = 0
+        daySearch = ""
+        screen = .day
     }
 
     private var rewindYear: some View {
