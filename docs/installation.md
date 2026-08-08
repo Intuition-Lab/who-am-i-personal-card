@@ -114,7 +114,7 @@ immutable Git tag:
 
 ```bash
 codex plugin marketplace add \
-  "Intuition-Lab/who-am-i-personal-card@v0.1.0-beta.4"
+  "Intuition-Lab/who-am-i-personal-card@v0.1.0-beta.5"
 codex plugin add personal-model-context@intuition-lab
 ```
 

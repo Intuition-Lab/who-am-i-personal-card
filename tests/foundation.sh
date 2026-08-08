@@ -498,6 +498,57 @@ test_runtime_checkout_retries_transient_fetch() {
   [[ "${fetch_calls}" -eq 2 ]]
 }
 
+test_bundled_runtime_checkout_is_copied_and_verified() {
+  local source_checkout="${TEST_CASES}/bundled-runtime-source"
+  local destination="${TEST_CASES}/bundled-runtime-copy"
+  local verify_calls=0
+
+  mkdir -p "${source_checkout}/.git"
+  printf 'runtime payload\n' > "${source_checkout}/payload.txt"
+  runtime_checkout_verify() {
+    local checkout="$1"
+    verify_calls=$((verify_calls + 1))
+    [[ "${checkout}" == "${destination}" ]]
+    [[ -d "${checkout}/.git" ]]
+    grep -Fq 'runtime payload' "${checkout}/payload.txt"
+  }
+
+  runtime_checkout_copy_bundled "${source_checkout}" "${destination}"
+  [[ "${verify_calls}" -eq 1 ]]
+  [[ -f "${destination}/payload.txt" ]]
+}
+
+test_bundled_runtime_checkout_rejects_symlinks() {
+  local source_checkout="${TEST_CASES}/bundled-runtime-symlink"
+  local destination="${TEST_CASES}/bundled-runtime-symlink-copy"
+
+  mkdir -p "${source_checkout}/.git"
+  printf 'payload\n' > "${source_checkout}/payload.txt"
+  ln -s payload.txt "${source_checkout}/linked-payload.txt"
+
+  assert_rejected_contains "contains a symbolic link" \
+    runtime_checkout_copy_bundled "${source_checkout}" "${destination}"
+  [[ ! -e "${destination}" ]]
+}
+
+test_product_installer_never_fetches_runtime_source() {
+  local installer="${PRODUCT_ROOT}/install.sh"
+  local uninstaller="${PRODUCT_ROOT}/uninstall-runtime.sh"
+
+  grep -Fq 'prepare_bundled_runtime_checkout' "${installer}"
+  grep -Fq 'never access the Personal Model source repository' "${installer}"
+  if grep -Eq '^[[:space:]]*runtime_checkout_create([[:space:]]|$)' \
+    "${installer}"; then
+    printf 'Product installer still creates a network Runtime checkout.\n'
+    return 1
+  fi
+  if grep -Eq '^[[:space:]]*runtime_checkout_create([[:space:]]|$)' \
+    "${uninstaller}"; then
+    printf 'Product uninstaller still creates a network Runtime checkout.\n'
+    return 1
+  fi
+}
+
 test_receipt_round_trip() {
   local install_home="${TEST_HOME}/receipt-round-trip"
   local receipt="${install_home}/product-runtime.lock"
@@ -2243,6 +2294,12 @@ run_case "unsafe temporary prefix is rejected" \
   test_unsafe_temporary_prefix_rejected
 run_case "pinned Runtime checkout retries a transient fetch failure" \
   test_runtime_checkout_retries_transient_fetch
+run_case "bundled Runtime checkout is copied and verified" \
+  test_bundled_runtime_checkout_is_copied_and_verified
+run_case "bundled Runtime checkout rejects symbolic links" \
+  test_bundled_runtime_checkout_rejects_symlinks
+run_case "product installer never fetches the Runtime source repository" \
+  test_product_installer_never_fetches_runtime_source
 
 run_case "Runtime receipt matches the pinned lock" test_receipt_round_trip
 run_case "tampered Runtime receipt is rejected" test_tampered_receipt_rejected

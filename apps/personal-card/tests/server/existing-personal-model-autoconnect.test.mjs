@@ -68,6 +68,7 @@ test("production auto-connects an owner-controlled existing Personal Model", asy
       root: "EXISTING_ROOT_ONLY_7D31",
       face: "EXISTING_FACE_ONLY_7D31",
       rewind: "EXISTING_REWIND_ONLY_7D31",
+      memoryUpdated: "2026-08-08 14:30:00+08:00",
     }),
     { mode: 0o600 },
   );
@@ -117,6 +118,10 @@ test("production auto-connects an owner-controlled existing Personal Model", asy
   assert.match(
     bootstrap.snapshot.personalModel.root,
     /EXISTING_ROOT_ONLY_7D31/,
+  );
+  assert.equal(
+    bootstrap.snapshot.personalModel.updatedAt,
+    "2026-08-08T06:30:00.000Z",
   );
   assert.match(
     JSON.stringify(bootstrap.snapshot.time),

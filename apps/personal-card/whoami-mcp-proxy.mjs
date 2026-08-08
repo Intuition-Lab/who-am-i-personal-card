@@ -10,9 +10,9 @@ function argument(name, fallback = "") {
 }
 
 const AGENT = argument("--agent", process.env.WHOAMI_AGENT || "agent").slice(0, 40);
-const MODEL_ID = argument("--model", "cecilia");
-const CONNECTOR_SESSION_ID = argument("--connector-session", "cs_local_legacy");
-const GRANT_ID = argument("--grant", "owner_cecilia_local");
+const MODEL_ID = argument("--model");
+const CONNECTOR_SESSION_ID = argument("--connector-session");
+const GRANT_ID = argument("--grant");
 const RUNTIME_DATA_ROOT = argument(
   "--runtime-root",
   resolve(process.env.HOME || "", "Library/Application Support/Who Am I/runtime"),

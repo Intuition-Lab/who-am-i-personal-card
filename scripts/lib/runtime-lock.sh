@@ -224,6 +224,34 @@ runtime_checkout_create() {
     -c advice.detachedHead=false checkout --quiet --detach FETCH_HEAD
 }
 
+runtime_checkout_copy_bundled() {
+  local source_checkout="$1"
+  local destination="$2"
+  local unsafe_link=""
+
+  if [[ ! -d "${source_checkout}" || -L "${source_checkout}" \
+    || ! -d "${source_checkout}/.git" || -L "${source_checkout}/.git" ]]; then
+    printf 'Bundled Runtime checkout is missing or unsafe: %s\n' \
+      "${source_checkout}" >&2
+    return 1
+  fi
+  if [[ -e "${destination}" || -L "${destination}" ]]; then
+    printf 'Checkout destination already exists: %s\n' "${destination}" >&2
+    return 1
+  fi
+  unsafe_link="$(
+    /usr/bin/find "${source_checkout}" -type l -print -quit 2>/dev/null || true
+  )"
+  if [[ -n "${unsafe_link}" ]]; then
+    printf 'Bundled Runtime checkout contains a symbolic link: %s\n' \
+      "${unsafe_link}" >&2
+    return 1
+  fi
+
+  /bin/cp -R "${source_checkout}" "${destination}"
+  runtime_checkout_verify "${destination}"
+}
+
 runtime_checkout_verify() {
   local checkout="$1"
   local actual_commit actual_tree actual_digest project_name project_version
@@ -246,6 +274,12 @@ runtime_checkout_verify() {
   fi
   if ! runtime_git -C "${checkout}" fsck --strict --no-dangling >/dev/null; then
     printf 'Runtime checkout failed strict Git object verification.\n' >&2
+    return 1
+  fi
+  if [[ -n "$(
+    runtime_git -C "${checkout}" status --porcelain --untracked-files=all
+  )" ]]; then
+    printf 'Runtime checkout contains modified or untracked content.\n' >&2
     return 1
   fi
 

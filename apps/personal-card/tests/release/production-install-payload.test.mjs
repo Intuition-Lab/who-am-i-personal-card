@@ -10,6 +10,7 @@ const installerPath = path.join(productRoot, "install.sh");
 
 const forbidden = [
   ["Ceci", "lia"].join(""),
+  ["ceci", "lia"].join(""),
   ["@ceci", "lia"].join(""),
   ["lin", "-demo"].join(""),
   ["Lin", " · @lin"].join(""),

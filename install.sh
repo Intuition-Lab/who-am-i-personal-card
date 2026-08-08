@@ -76,6 +76,7 @@ TARGET_RUNTIME_LOCK="${PRODUCT_ROOT}/runtime.lock"
 runtime_lock_load "${TARGET_RUNTIME_LOCK}"
 product_lock_load "${PRODUCT_ROOT}/product.lock"
 runtime_install_home_resolve
+BUNDLED_RUNTIME_ROOT="${WHOAMI_BUNDLED_RUNTIME_ROOT:-${PRODUCT_ROOT}/runtime-source}"
 
 resolve_interaction_mode() {
   if [[ "${INTERACTION_MODE}" == "auto" ]]; then
@@ -122,7 +123,7 @@ installer_test_failpoint() {
 print_plan() {
   cat <<EOF
 Product version:     $(tr -d '[:space:]' < "${PRODUCT_ROOT}/VERSION")
-Runtime repository:  ${RUNTIME_REPOSITORY}
+Runtime source:      bundled in this product package
 Runtime commit:      ${RUNTIME_COMMIT}
 Runtime tree:        ${RUNTIME_TREE}
 Runtime project:     ${RUNTIME_PROJECT_NAME} ${RUNTIME_PROJECT_VERSION}
@@ -134,18 +135,34 @@ Interaction mode:    ${INTERACTION_MODE}
 The installer will:
   1. verify this is a supported Mac;
   2. securely detect an existing owner-local Personal Model, if present;
-  3. otherwise fetch and verify exactly the pinned Runtime commit;
+  3. otherwise copy and verify the Runtime embedded in this package;
   4. install or update only the product-managed Runtime path;
   5. never claim, replace, or re-onboard a standalone existing Runtime;
-  6. install the native Who Am I app and its pinned private Node runtime.
+  6. never access the Personal Model source repository during installation;
+  7. install the native Who Am I app and its pinned private Node runtime.
 EOF
   if [[ "${INTERACTION_MODE}" == "interactive" ]]; then
     printf '%s\n' \
-      '  7. guide the signed-in user through permissions and Runtime onboarding.'
+      '  8. guide the signed-in user through permissions and Runtime onboarding.'
   else
     printf '%s\n' \
-      '  7. defer permission prompts and print the pinned onboarding command.'
+      '  8. defer permission prompts and print the pinned onboarding command.'
   fi
+}
+
+prepare_bundled_runtime_checkout() {
+  local destination="$1"
+
+  if [[ ! -d "${BUNDLED_RUNTIME_ROOT}" \
+    || -L "${BUNDLED_RUNTIME_ROOT}" \
+    || ! -d "${BUNDLED_RUNTIME_ROOT}/.git" ]]; then
+    printf '%s\n' \
+      'This source checkout is not a self-contained Who Am I package.' \
+      'Download the self-contained package from this product repository release.' \
+      'No Personal Model repository was contacted.' >&2
+    return 1
+  fi
+  runtime_checkout_copy_bundled "${BUNDLED_RUNTIME_ROOT}" "${destination}"
 }
 
 stop_previous_product_card_server() {
@@ -190,7 +207,8 @@ install_personal_card() {
   local architecture node_architecture node_archive node_sha node_directory
   local applications_root app_bundle executable_path legacy_executable_path
   local plist_path native_build_root staged_app_bundle previous_app_bundle
-  local target_ready=0
+  local previous_target_root
+  local target_exists=0
 
   product_version="$(tr -d '[:space:]' < "${PRODUCT_ROOT}/VERSION")"
   app_root="${RUNTIME_INSTALL_HOME}/product-app"
@@ -240,8 +258,8 @@ install_personal_card() {
       && -f "${target_root}/product-version" \
       && "$(tr -d '[:space:]' < "${target_root}/product-version")" == \
         "${product_version}" ]]; then
-      printf 'Personal Card %s is already installed.\n' "${product_version}"
-      target_ready=1
+      printf 'Refreshing installed Personal Card %s.\n' "${product_version}"
+      target_exists=1
     else
       printf 'An incomplete Personal Card installation already exists.\n' >&2
       return 1
@@ -249,80 +267,77 @@ install_personal_card() {
   fi
   stop_previous_product_card_server
 
-  if [[ "${target_ready}" -eq 0 ]]; then
-    /bin/mkdir -p "${app_root}" "${staging_root}"
-    /bin/chmod 0700 "${app_root}" "${staging_root}"
-    /bin/cp -R "${source_root}/assets" "${staging_root}/"
-    /bin/mkdir -p "${staging_root}/src/providers"
-    /bin/cp -R \
-      "${source_root}/src/auth" \
-      "${source_root}/src/client" \
-      "${source_root}/src/connectors" \
-      "${source_root}/src/contracts" \
-      "${source_root}/src/evidence" \
-      "${source_root}/src/setup" \
-      "${staging_root}/src/"
-    /bin/cp \
-      "${source_root}/src/providers/local-persome-provider.mjs" \
-      "${source_root}/src/providers/provider-registry.mjs" \
-      "${source_root}/src/providers/remote-personal-model-provider.mjs" \
-      "${source_root}/src/providers/snapshot-backed-provider.mjs" \
-      "${staging_root}/src/providers/"
-    /bin/cp \
-      "${source_root}/package.json" \
-      "${source_root}/package-lock.json" \
-      "${source_root}/persome-card-server.mjs" \
-      "${source_root}/whoami-mcp-proxy.mjs" \
-      "${source_root}/WhoAmI v5 · Persome Live.html" \
-      "${source_root}/设置我的 Personal Model.command" \
-      "${staging_root}/"
-    /bin/cp "${PRODUCT_ROOT}/VERSION" "${staging_root}/product-version"
-    /bin/chmod 0600 "${staging_root}/product-version"
+  /bin/mkdir -p "${app_root}" "${staging_root}"
+  /bin/chmod 0700 "${app_root}" "${staging_root}"
+  /bin/cp -R "${source_root}/assets" "${staging_root}/"
+  /bin/mkdir -p "${staging_root}/src/providers"
+  /bin/cp -R \
+    "${source_root}/src/auth" \
+    "${source_root}/src/client" \
+    "${source_root}/src/connectors" \
+    "${source_root}/src/contracts" \
+    "${source_root}/src/evidence" \
+    "${source_root}/src/setup" \
+    "${staging_root}/src/"
+  /bin/cp \
+    "${source_root}/src/providers/local-persome-provider.mjs" \
+    "${source_root}/src/providers/provider-registry.mjs" \
+    "${source_root}/src/providers/remote-personal-model-provider.mjs" \
+    "${source_root}/src/providers/snapshot-backed-provider.mjs" \
+    "${staging_root}/src/providers/"
+  /bin/cp \
+    "${source_root}/package.json" \
+    "${source_root}/package-lock.json" \
+    "${source_root}/persome-card-server.mjs" \
+    "${source_root}/whoami-mcp-proxy.mjs" \
+    "${source_root}/WhoAmI v5 · Persome Live.html" \
+    "${source_root}/设置我的 Personal Model.command" \
+    "${staging_root}/"
+  /bin/cp "${PRODUCT_ROOT}/VERSION" "${staging_root}/product-version"
+  /bin/chmod 0600 "${staging_root}/product-version"
 
-    architecture="$(uname -m)"
-    case "${architecture}" in
-      arm64)
-        node_architecture="arm64"
-        node_sha="${PRODUCT_NODE_DARWIN_ARM64_SHA256}"
-        ;;
-      x86_64)
-        node_architecture="x64"
-        node_sha="${PRODUCT_NODE_DARWIN_X64_SHA256}"
-        ;;
-      *)
-        printf 'Unsupported Node architecture: %s\n' "${architecture}" >&2
-        return 1
-        ;;
-    esac
-    node_archive="node-v${PRODUCT_NODE_VERSION}-darwin-${node_architecture}.tar.xz"
-    node_directory="node-v${PRODUCT_NODE_VERSION}-darwin-${node_architecture}"
-    /usr/bin/curl --proto '=https' --tlsv1.2 --fail \
-      --retry 3 --retry-delay 2 --retry-all-errors \
-      --location \
-      --output "${temporary_root}/${node_archive}" \
-      "${PRODUCT_NODE_BASE_URL}/${node_archive}"
-    if [[ "$(/usr/bin/shasum -a 256 "${temporary_root}/${node_archive}" | /usr/bin/awk '{print $1}')" \
-      != "${node_sha}" ]]; then
-      printf 'Pinned Node runtime digest mismatch.\n' >&2
+  architecture="$(uname -m)"
+  case "${architecture}" in
+    arm64)
+      node_architecture="arm64"
+      node_sha="${PRODUCT_NODE_DARWIN_ARM64_SHA256}"
+      ;;
+    x86_64)
+      node_architecture="x64"
+      node_sha="${PRODUCT_NODE_DARWIN_X64_SHA256}"
+      ;;
+    *)
+      printf 'Unsupported Node architecture: %s\n' "${architecture}" >&2
       return 1
-    fi
-    /bin/mkdir -p "${staging_root}/runtime"
-    /usr/bin/tar -xJf "${temporary_root}/${node_archive}" \
-      -C "${staging_root}/runtime"
-    /bin/mv \
-      "${staging_root}/runtime/${node_directory}" \
-      "${staging_root}/runtime/node"
-    (
-      cd "${staging_root}"
-      /usr/bin/env -i \
-        HOME="${HOME}" \
-        PATH="${staging_root}/runtime/node/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
-        npm ci --omit=dev --ignore-scripts --no-audit --no-fund
-    )
-    /bin/chmod 0700 \
-      "${staging_root}/设置我的 Personal Model.command"
-    /bin/mv "${staging_root}" "${target_root}"
+      ;;
+  esac
+  node_archive="node-v${PRODUCT_NODE_VERSION}-darwin-${node_architecture}.tar.xz"
+  node_directory="node-v${PRODUCT_NODE_VERSION}-darwin-${node_architecture}"
+  /usr/bin/curl --proto '=https' --tlsv1.2 --fail \
+    --retry 3 --retry-delay 2 --retry-all-errors \
+    --location \
+    --output "${temporary_root}/${node_archive}" \
+    "${PRODUCT_NODE_BASE_URL}/${node_archive}"
+  if [[ "$(/usr/bin/shasum -a 256 "${temporary_root}/${node_archive}" | /usr/bin/awk '{print $1}')" \
+    != "${node_sha}" ]]; then
+    printf 'Pinned Node runtime digest mismatch.\n' >&2
+    return 1
   fi
+  /bin/mkdir -p "${staging_root}/runtime"
+  /usr/bin/tar -xJf "${temporary_root}/${node_archive}" \
+    -C "${staging_root}/runtime"
+  /bin/mv \
+    "${staging_root}/runtime/${node_directory}" \
+    "${staging_root}/runtime/node"
+  (
+    cd "${staging_root}"
+    /usr/bin/env -i \
+      HOME="${HOME}" \
+      PATH="${staging_root}/runtime/node/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+      npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+  )
+  /bin/chmod 0700 \
+    "${staging_root}/设置我的 Personal Model.command"
 
   if [[ ! -f "${source_root}/macos/WhoAmIApp.swift" \
     || -L "${source_root}/macos/WhoAmIApp.swift" \
@@ -351,6 +366,19 @@ install_personal_card() {
     /bin/mkdir "${applications_root}"
     /bin/chmod 0700 "${applications_root}"
   fi
+  if [[ "${target_exists}" -eq 1 ]]; then
+    previous_target_root="${temporary_root}/previous-personal-card-${product_version}"
+    /bin/mv "${target_root}" "${previous_target_root}"
+  fi
+  if ! /bin/mv "${staging_root}" "${target_root}"; then
+    if [[ -n "${previous_target_root:-}" \
+      && -d "${previous_target_root}" \
+      && ! -e "${target_root}" ]]; then
+      /bin/mv "${previous_target_root}" "${target_root}" || true
+    fi
+    printf 'Could not install the Personal Card payload.\n' >&2
+    return 1
+  fi
   if [[ -e "${app_bundle}" || -L "${app_bundle}" ]]; then
     previous_app_bundle="${temporary_root}/previous-Who-Am-I.app"
     /bin/mv "${app_bundle}" "${previous_app_bundle}"
@@ -360,6 +388,14 @@ install_personal_card() {
       && -d "${previous_app_bundle}" \
       && ! -e "${app_bundle}" ]]; then
       /bin/mv "${previous_app_bundle}" "${app_bundle}" || true
+    fi
+    if [[ -d "${target_root}" && ! -L "${target_root}" ]]; then
+      /bin/mv "${target_root}" "${staging_root}" || true
+    fi
+    if [[ -n "${previous_target_root:-}" \
+      && -d "${previous_target_root}" \
+      && ! -e "${target_root}" ]]; then
+      /bin/mv "${previous_target_root}" "${target_root}" || true
     fi
     printf 'Could not install the native Who Am I app.\n' >&2
     return 1
@@ -773,7 +809,7 @@ fi
 if [[ "${MANAGED_EXISTING}" -eq 1 \
   && "${ACTIVE_EXISTING_LOCK}" == "${TARGET_RUNTIME_LOCK}" ]]; then
   temporary_root="$(runtime_temporary_root_create "personal-model-product")"
-  runtime_checkout_create "${temporary_root}/runtime"
+  prepare_bundled_runtime_checkout "${temporary_root}/runtime"
   runtime_checkout_verify "${temporary_root}/runtime"
   install_management_bundle "${temporary_root}/runtime"
   install_personal_card
@@ -804,7 +840,7 @@ fi
 shim_state_preflight
 
 temporary_root="$(runtime_temporary_root_create "personal-model-product")"
-runtime_checkout_create "${temporary_root}/runtime"
+prepare_bundled_runtime_checkout "${temporary_root}/runtime"
 runtime_checkout_verify "${temporary_root}/runtime"
 
 if [[ "${MANAGED_EXISTING}" -eq 0 ]]; then

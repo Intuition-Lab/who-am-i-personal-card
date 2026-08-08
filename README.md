@@ -89,7 +89,7 @@ development fixtures.
 (
   set -euo pipefail
   REPOSITORY="Intuition-Lab/who-am-i-personal-card"
-  VERSION="0.1.0-beta.4"
+  VERSION="0.1.0-beta.5"
   REPOSITORY_NAME="${REPOSITORY##*/}"
   RELEASE_BASE="https://github.com/${REPOSITORY}/releases/download/v${VERSION}"
   DOWNLOAD_DIRECTORY="$(
@@ -188,7 +188,7 @@ install the plugin:
 
 ```bash
 codex plugin marketplace add \
-  "Intuition-Lab/who-am-i-personal-card@v0.1.0-beta.4"
+  "Intuition-Lab/who-am-i-personal-card@v0.1.0-beta.5"
 codex plugin add personal-model-context@intuition-lab
 ```
 

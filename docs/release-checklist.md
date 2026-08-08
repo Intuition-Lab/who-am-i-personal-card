@@ -239,7 +239,7 @@ product intake; one missing workflow keeps the aggregate item unchecked.
 
 ## Final decision
 
-<!-- release-decision:v1 status=HOLD version=0.1.0-beta.4 commit=TBD owner=TBD approved-at=TBD -->
+<!-- release-decision:v1 status=HOLD version=0.1.0-beta.5 commit=TBD owner=TBD approved-at=TBD -->
 
 | Decision | Selected / evidence |
 | --- | --- |

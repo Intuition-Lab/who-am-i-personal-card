@@ -55,7 +55,10 @@ const toolResults = {
   },
   list_memories: {
     count: 2,
-    files: [{ path: "memory/mira.md", updated: "2026-08-07T02:00:00.000Z" }],
+    files: [{
+      path: "memory/mira.md",
+      updated: persona.memoryUpdated || "2026-08-07T02:00:00.000Z",
+    }],
   },
   behavior_patterns: {
     root: { signature: `${persona.root}. Builds calm tools from field evidence.` },

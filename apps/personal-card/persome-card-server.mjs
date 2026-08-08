@@ -23,6 +23,7 @@ import { ProviderRegistry } from "./src/providers/provider-registry.mjs";
 import { OWNER_SCOPES } from "./src/auth/scope-policy.mjs";
 import { existingPersonalModelProfile } from "./src/setup/existing-personal-model-profile.mjs";
 import { OwnerProfileStore } from "./src/setup/owner-profile-store.mjs";
+import { managedRuntimeIdentityMatches } from "./src/setup/runtime-identity.mjs";
 
 const CARD_ROOT = dirname(fileURLToPath(import.meta.url));
 const PRODUCT_VERSION = (() => {
@@ -178,9 +179,11 @@ function managedRuntimeIdentityReady(cliPath) {
     return false;
   }
   try {
-    const expected = readFileSync(managementLock, "utf8");
-    return readFileSync(externalReceipt, "utf8") === expected
-      && readFileSync(internalReceipt, "utf8") === expected;
+    return managedRuntimeIdentityMatches({
+      managementLockText: readFileSync(managementLock, "utf8"),
+      externalReceiptText: readFileSync(externalReceipt, "utf8"),
+      internalReceiptText: readFileSync(internalReceipt, "utf8"),
+    });
   } catch {
     return false;
   }
@@ -2137,11 +2140,14 @@ async function loadLocalOwnerSnapshot(profile) {
         when: String(item.t || item.when || "现在"),
         ...(item.day ? { dayId: String(item.day) } : {}),
       }));
-    const updatedAt = files
+    const updatedValue = files
       .map((file) => file.updated)
       .filter((value) => Number.isFinite(Date.parse(value)))
       .sort()
-      .at(-1) || new Date().toISOString();
+      .at(-1);
+    const updatedAt = updatedValue
+      ? new Date(updatedValue).toISOString()
+      : new Date().toISOString();
     const latestDay = days[0];
     const weeklyLetter = String(latestDay?.letter || "")
       .split(/\r?\n/)

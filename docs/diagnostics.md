@@ -66,7 +66,7 @@ The JSON schema is versioned independently through `schema_version`. Example:
 {
   "schema_version": 1,
   "status": "healthy",
-  "product_version": "0.1.0-beta.4",
+  "product_version": "0.1.0-beta.5",
   "expected_runtime_commit": "e1315d03cafb",
   "macos_version": "15.6",
   "architecture": "arm64",
