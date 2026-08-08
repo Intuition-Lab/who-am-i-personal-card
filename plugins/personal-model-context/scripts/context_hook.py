@@ -22,8 +22,8 @@ MAX_CONTEXT_CHARS = 7_200
 MCP_DEADLINE_SECONDS = 5.5
 EXPECTED_IDENTITY = {
     "RUNTIME_REPOSITORY": "https://github.com/Intuition-Lab/personal-model.git",
-    "RUNTIME_COMMIT": "e1315d03cafb62418503e6d92b9e73400720fcd4",
-    "RUNTIME_TREE": "1835049eb58d6aa7006562b2cbe6ad56c6242721",
+    "RUNTIME_COMMIT": "59b2d2e154e8d16fb9bb7dfe404a44169a27a9b5",
+    "RUNTIME_TREE": "af47810eef83e9b8d25c5783bcf5d31efd093cf4",
     "RUNTIME_PROJECT_NAME": "persome-core",
     "RUNTIME_PROJECT_VERSION": "0.3.2",
 }
@@ -423,7 +423,12 @@ def _load_context(event: str, prompt: str | None) -> list[tuple[str, Any]]:
                     "Relevant durable memory",
                     client.call_tool(
                         "search",
-                        {"query": prompt, "top_k": 5, "breadth": 0.2},
+                        {
+                            "query": prompt,
+                            "top_k": 5,
+                            "breadth": 0.2,
+                            "include_chains": False,
+                        },
                     ),
                 )
             ]

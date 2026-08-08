@@ -5,8 +5,8 @@ import { managedRuntimeIdentityMatches } from "../../src/setup/runtime-identity.
 
 const identity = Object.freeze({
   repository: "https://github.com/Intuition-Lab/personal-model.git",
-  commit: "e1315d03cafb62418503e6d92b9e73400720fcd4",
-  tree: "1835049eb58d6aa7006562b2cbe6ad56c6242721",
+  commit: "59b2d2e154e8d16fb9bb7dfe404a44169a27a9b5",
+  tree: "af47810eef83e9b8d25c5783bcf5d31efd093cf4",
   project: "persome-core",
   version: "0.3.2",
 });
