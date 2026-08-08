@@ -7,6 +7,11 @@ import {
   PersonalModelProviderError,
   assertSafeModelId,
 } from "../contracts/personal-model-provider.mjs";
+import {
+  normalizeSearchOptions,
+  normalizeSearchResults,
+  publicSearchResult,
+} from "../content/personal-model-content-backend.mjs";
 
 export function freezeCopy(value) {
   const copy = structuredClone(value);
@@ -109,13 +114,37 @@ function searchableEntries(snapshot) {
   return entries;
 }
 
-function evidenceContent(snapshot, reference) {
+function derivedSnapshotEvidence({ content, recordId, application, title, claim }) {
+  return {
+    content,
+    source: {
+      type: "derived-summary",
+      originalTime: null,
+      application: application || null,
+      title: title || null,
+      recordId,
+    },
+    supports:
+      typeof claim === "string" && claim.trim()
+        ? [{ claim: claim.trim(), relationship: "indirect" }]
+        : [],
+    availability: {
+      status: "unavailable",
+      reason: "original-source-unavailable",
+    },
+  };
+}
+
+function snapshotEvidence(snapshot, reference) {
   for (const face of snapshot.personalModel.faces) {
     if (face.evidenceRefs?.includes(reference)) {
-      return {
-        kind: "face",
-        face,
-      };
+      return derivedSnapshotEvidence({
+        content: { kind: "face", face },
+        recordId: face.id,
+        application: "Persome",
+        title: "Personal Model face",
+        claim: face.text,
+      });
     }
   }
 
@@ -124,14 +153,20 @@ function evidenceContent(snapshot, reference) {
       (candidate) => candidate.evidenceRef === reference,
     );
     if (event) {
-      return {
-        kind: "event",
-        day: {
-          id: day.id,
-          title: day.title,
+      return derivedSnapshotEvidence({
+        content: {
+          kind: "event",
+          day: {
+            id: day.id,
+            title: day.title,
+          },
+          event,
         },
-        event,
-      };
+        recordId: event.id,
+        application: event.app,
+        title: event.title,
+        claim: event.detail,
+      });
     }
   }
 
@@ -139,11 +174,21 @@ function evidenceContent(snapshot, reference) {
     candidate.evidenceRefs.includes(reference),
   );
   if (report) {
-    return {
-      kind: "report",
-      reportId: report.id,
+    const connector = snapshot.connectors.find(
+      (candidate) => candidate.id === report.connectorId,
+    );
+    return derivedSnapshotEvidence({
+      content: {
+        kind: "report",
+        reportId: report.id,
+        title: report.title,
+        summary: report.summary,
+      },
+      recordId: report.id,
+      application: connector?.product || report.connectorId,
       title: report.title,
-    };
+      claim: report.summary,
+    });
   }
 
   return null;
@@ -163,7 +208,7 @@ export class SnapshotBackedPersonalModelProvider extends PersonalModelProvider {
     });
   }
 
-  async search(modelId, query, grant, options) {
+  async search(modelId, query, grant, options = {}) {
     assertSafeModelId(modelId);
     if (typeof query !== "string" || query.trim().length === 0) {
       throw new PersonalModelProviderError(
@@ -173,13 +218,14 @@ export class SnapshotBackedPersonalModelProvider extends PersonalModelProvider {
       );
     }
 
+    const searchOptions = normalizeSearchOptions(options);
     const snapshot = await this.getSnapshot(modelId, grant, options);
     const terms = query
       .trim()
       .toLocaleLowerCase()
       .split(/\s+/u)
       .filter(Boolean);
-    const results = searchableEntries(snapshot)
+    const matches = searchableEntries(snapshot)
       .filter((entry) => {
         const haystack = `${entry.title}\n${entry.text}`.toLocaleLowerCase();
         return terms.every((term) => haystack.includes(term));
@@ -188,6 +234,12 @@ export class SnapshotBackedPersonalModelProvider extends PersonalModelProvider {
         modelId: snapshot.model.id,
         ...entry,
       }));
+    const results = normalizeSearchResults({
+      modelId,
+      payload: matches,
+      topK: searchOptions.topK,
+      method: "snapshot-keyword-search",
+    }).map(publicSearchResult);
 
     return freezeCopy(results);
   }
@@ -206,8 +258,8 @@ export class SnapshotBackedPersonalModelProvider extends PersonalModelProvider {
     }
 
     const snapshot = await this.getSnapshot(modelId, grant, options);
-    const content = evidenceContent(snapshot, reference);
-    if (content === null) {
+    const evidence = snapshotEvidence(snapshot, reference);
+    if (evidence === null) {
       throw new PersonalModelProviderError(
         "EVIDENCE_NOT_FOUND",
         "The requested Evidence was not found.",
@@ -218,7 +270,7 @@ export class SnapshotBackedPersonalModelProvider extends PersonalModelProvider {
     return parsePersonalModelEvidenceResponse({
       modelId,
       reference,
-      content,
+      ...evidence,
     });
   }
 

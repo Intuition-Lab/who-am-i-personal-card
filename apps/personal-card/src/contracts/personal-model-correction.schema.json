@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://whoami.local/schemas/personal-model-correction.schema.json",
+  "title": "PersonalModelCorrectionResponse",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["modelId", "status", "receipt", "affected", "verification"],
+  "properties": {
+    "modelId": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["accepted", "applied"] },
+    "receipt": { "type": ["string", "null"] },
+    "receiptSource": { "enum": ["runtime", "product", "remote"] },
+    "affected": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["previousConclusion", "state"],
+        "properties": {
+          "reference": { "type": "string", "minLength": 3 },
+          "previousConclusion": { "type": "string", "minLength": 1 },
+          "replacement": { "type": "string" },
+          "state": { "enum": ["deprioritized", "pending"] }
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "refreshed",
+        "oldConclusionDeprioritized"
+      ],
+      "properties": {
+        "status": { "enum": ["unverified", "verified"] },
+        "refreshed": { "type": "boolean" },
+        "oldConclusionDeprioritized": { "type": "boolean" },
+        "previousUpdatedAt": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "status": { "const": "applied" } },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "receipt": { "type": "string", "minLength": 1 },
+          "affected": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "state": { "const": "deprioritized" }
+              }
+            }
+          },
+          "verification": {
+            "type": "object",
+            "properties": {
+              "status": { "const": "verified" },
+              "refreshed": { "const": true },
+              "oldConclusionDeprioritized": { "const": true }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

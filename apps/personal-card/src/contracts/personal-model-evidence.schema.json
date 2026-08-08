@@ -4,10 +4,75 @@
   "title": "PersonalModelEvidenceResponse",
   "type": "object",
   "additionalProperties": false,
-  "required": ["modelId", "reference", "content"],
+  "required": [
+    "modelId",
+    "reference",
+    "source",
+    "supports",
+    "availability",
+    "content"
+  ],
   "properties": {
     "modelId": { "type": "string", "minLength": 1 },
     "reference": { "type": "string", "minLength": 3 },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "originalTime", "application", "title"],
+      "properties": {
+        "type": {
+          "enum": [
+            "persome-memory",
+            "persome-activity",
+            "derived-summary",
+            "agent-connector-receipt",
+            "coast-frame"
+          ]
+        },
+        "originalTime": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "application": { "type": ["string", "null"] },
+        "title": { "type": ["string", "null"] },
+        "recordId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "supports": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["claim", "relationship"],
+        "properties": {
+          "claim": { "type": "string", "minLength": 1 },
+          "relationship": { "enum": ["direct", "indirect"] }
+        }
+      }
+    },
+    "availability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["available", "unavailable"] },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "status": { "const": "unavailable" } },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "reason": { "type": "string", "minLength": 1 }
+            },
+            "required": ["reason"]
+          }
+        }
+      ]
+    },
     "content": {},
     "receipt": { "type": "string" },
     "capturedAt": { "type": "string", "format": "date-time" }

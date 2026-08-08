@@ -152,7 +152,7 @@ test("expired Connector Sessions are rejected and revoked", () => {
   );
 });
 
-test("stable event hash includes modelId, connectorId, sessionId, and grantId", () => {
+test("stable event hash covers identity and every Report-visible event field", () => {
   const base = {
     modelId: "cecilia",
     connectorId: "codex",
@@ -165,6 +165,9 @@ test("stable event hash includes modelId, connectorId, sessionId, and grantId", 
     summary: "same event",
     occurredAt: NOW.toISOString(),
     durationMs: 12,
+    details: ["recorded result"],
+    interpretation: "recorded interpretation",
+    status: "ok",
   };
   const baseHash = stableConnectorEventHash(base);
 
@@ -173,6 +176,9 @@ test("stable event hash includes modelId, connectorId, sessionId, and grantId", 
     ["connectorId", "claude-code"],
     ["sessionId", "cs_cecilia_session_0002"],
     ["grantId", "grant_other"],
+    ["details", ["tampered result"]],
+    ["interpretation", "tampered interpretation"],
+    ["status", "error"],
   ]) {
     assert.notEqual(
       stableConnectorEventHash({ ...base, [field]: value }),
@@ -426,6 +432,90 @@ test("EvidenceService blocks cross-model receipt before calling Provider", async
   assert.equal(providerCalls, 1);
 });
 
+test("EvidenceService resolves connector receipts inside the exact model, viewer, session, and Grant partition", async () => {
+  await withTempRuntime(async (runtimeRoot) => {
+    const sessions = createSessionService(["cs_cecilia_session_0001"]);
+    const cecilia = createConnectorSession(sessions);
+    const store = new ConnectorEventStore({
+      runtimeRoot,
+      clock: () => new Date(NOW),
+      sessionService: sessions,
+    });
+    const receipt = "cecilia:event:2026-08-07:01";
+    const recorded = await store.appendEvent(cecilia, {
+      requestId: 77,
+      tool: "search",
+      receipt,
+      summary: "The agent read the field-note evidence.",
+      occurredAt: NOW.toISOString(),
+    });
+    const evidence = new EvidenceService({
+      providerRegistry: new ProviderRegistry({
+        cecilia: new FixtureProvider(),
+      }),
+      sessionService: sessions,
+      eventStore: store,
+    });
+
+    const resolved = await evidence.getEvidence({
+      viewerSessionId: cecilia.viewerSessionId,
+      activeModelId: "cecilia",
+      connectorSessionId: cecilia.sessionId,
+      reference: receipt,
+    });
+    assert.equal(resolved.source.type, "agent-connector-receipt");
+    assert.equal(resolved.source.originalTime, NOW.toISOString());
+    assert.equal(resolved.source.application, "codex");
+    assert.equal(resolved.supports[0].relationship, "indirect");
+    assert.equal(resolved.availability.status, "available");
+    assert.equal(resolved.receipt, recorded.eventId);
+
+    await assert.rejects(
+      evidence.getEvidence({
+        viewerSessionId: "vs_viewer_0002",
+        activeModelId: "cecilia",
+        connectorSessionId: cecilia.sessionId,
+        reference: receipt,
+      }),
+      (error) => error.code === "VIEWER_SESSION_MISMATCH",
+    );
+  });
+});
+
+test("EvidenceService rejects Connector Sessions without evidence:read before Provider or receipt lookup", async () => {
+  const sessions = createSessionService(["cs_cecilia_session_0001"]);
+  const session = createConnectorSession(sessions, {
+    scopes: ["model:search", "reports:read"],
+  });
+  let providerCalls = 0;
+  const provider = new Proxy(new FixtureProvider(), {
+    get(target, property, receiver) {
+      if (property === "getEvidence") {
+        return async (...args) => {
+          providerCalls += 1;
+          return target.getEvidence(...args);
+        };
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  const evidence = new EvidenceService({
+    providerRegistry: new ProviderRegistry({ cecilia: provider }),
+    sessionService: sessions,
+  });
+
+  await assert.rejects(
+    evidence.getEvidence({
+      viewerSessionId: session.viewerSessionId,
+      activeModelId: "cecilia",
+      connectorSessionId: session.sessionId,
+      reference: "cecilia:event:2026-08-07:01",
+    }),
+    (error) => error.code === "CONNECTOR_SCOPE_DENIED",
+  );
+  assert.equal(providerCalls, 0);
+});
+
 test("Coast frame allowlist is partitioned by model and viewer session", async () => {
   const sessions = createSessionService(["cs_cecilia_session_0001"]);
   createConnectorSession(sessions);
@@ -452,6 +542,8 @@ test("Coast frame allowlist is partitioned by model and viewer session", async (
     reference: "cecilia:coast:frame_001",
   });
   assert.equal(allowed.content.marker, "cecilia:frame_001");
+  assert.equal(allowed.source.type, "coast-frame");
+  assert.equal(allowed.availability.status, "available");
 
   for (const request of [
     {

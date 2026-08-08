@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   PersonalModelCardValidationError,
   parsePersonalModelCardSnapshot,
+  parsePersonalModelCorrectionResponse,
   parsePersonalModelEvidenceResponse,
   parsePersonalModelGrantClaims,
   parsePublicPersonalModelCardSnapshot,
@@ -215,6 +216,15 @@ test("Public projection contains only card and identity data", async () => {
     () => parsePublicPersonalModelCardSnapshot(leakedResponse),
     PersonalModelCardValidationError,
   );
+
+  const leakedMetadataReference = clone(projected);
+  leakedMetadataReference.identity.metadata = {
+    sourceRefs: ["cecilia:event:2026-08-07:01"],
+  };
+  assert.throws(
+    () => parsePublicPersonalModelCardSnapshot(leakedMetadataReference),
+    PersonalModelCardValidationError,
+  );
 });
 
 test("Grant claims require audience and reject malformed expiry", () => {
@@ -256,6 +266,9 @@ test("Evidence response carries modelId and rejects cross-model references", () 
   });
 
   assert.equal(evidence.modelId, "lin-demo");
+  assert.equal(evidence.source.type, "derived-summary");
+  assert.equal(evidence.availability.status, "unavailable");
+  assert.equal(evidence.supports[0].relationship, "indirect");
   assert.ok(Object.isFrozen(evidence.content));
 
   assert.throws(
@@ -265,6 +278,117 @@ test("Evidence response carries modelId and rejects cross-model references", () 
         reference: "cecilia:event:2026-08-07:01",
         content: {},
       }),
+    PersonalModelCardValidationError,
+  );
+});
+
+test("Evidence contract preserves traceable original sources and rejects partial provenance", () => {
+  const evidence = parsePersonalModelEvidenceResponse({
+    modelId: "cecilia",
+    reference: "cecilia:memory:mem-01",
+    source: {
+      type: "persome-memory",
+      originalTime: "2026-08-06T03:20:00.000Z",
+      application: "Notes",
+      title: "Field note",
+      recordId: "mem-01",
+    },
+    supports: [
+      {
+        claim: "Returns to direct observation before a product decision.",
+        relationship: "direct",
+      },
+    ],
+    availability: { status: "available" },
+    content: { text: "Original memory text" },
+  });
+
+  assert.equal(evidence.source.type, "persome-memory");
+  assert.equal(evidence.source.originalTime, "2026-08-06T03:20:00.000Z");
+  assert.equal(evidence.supports[0].relationship, "direct");
+
+  const partial = clone(evidence);
+  delete partial.availability;
+  assert.throws(
+    () => parsePersonalModelEvidenceResponse(partial),
+    PersonalModelCardValidationError,
+  );
+});
+
+test("content metadata is optional, deeply frozen, model-bound, and hidden without Evidence scope", async () => {
+  const input = await loadJson(fixtureUrl("cecilia"));
+  input.identity.metadata = {
+    provenance: "generated",
+    sourceRefs: ["cecilia:event:2026-08-07:01"],
+    confidence: 0.82,
+    timeRange: {
+      start: "2026-08-07T00:00:00.000Z",
+      end: "2026-08-07T08:00:00.000Z",
+    },
+    generatedAt: "2026-08-07T08:00:00.000Z",
+    method: "daily-identity-v2",
+  };
+  const parsed = parsePersonalModelCardSnapshot(input);
+  assert.equal(parsed.identity.metadata.provenance, "generated");
+  assert.ok(Object.isFrozen(parsed.identity.metadata.sourceRefs));
+
+  const publicSnapshot = projectPublicPersonalModelCardSnapshot(parsed);
+  assert.equal(
+    Object.hasOwn(publicSnapshot.identity.metadata, "sourceRefs"),
+    false,
+  );
+  assert.equal(publicSnapshot.identity.metadata.method, "daily-identity-v2");
+
+  input.identity.metadata.sourceRefs = ["lin-demo:event:foreign"];
+  assert.throws(
+    () => parsePersonalModelCardSnapshot(input),
+    (error) =>
+      error instanceof PersonalModelCardValidationError &&
+      error.issues.some(
+        ({ path, keyword }) =>
+          path === "/identity/metadata/sourceRefs/0" &&
+          keyword === "modelOwnership",
+      ),
+  );
+});
+
+test("Correction contract distinguishes unverified legacy acceptance from verified propagation", () => {
+  const legacy = parsePersonalModelCorrectionResponse({
+    modelId: "cecilia",
+    accepted: true,
+  });
+  assert.equal(legacy.status, "accepted");
+  assert.equal(legacy.receipt, null);
+  assert.equal(legacy.verification.status, "unverified");
+  assert.equal(legacy.verification.oldConclusionDeprioritized, false);
+
+  const applied = parsePersonalModelCorrectionResponse({
+    modelId: "cecilia",
+    status: "applied",
+    receipt: "correction-001",
+    affected: [
+      {
+        reference: "cecilia:face:01",
+        previousConclusion: "Old conclusion",
+        replacement: "New conclusion",
+        state: "deprioritized",
+      },
+    ],
+    verification: {
+      status: "verified",
+      refreshed: true,
+      oldConclusionDeprioritized: true,
+      previousUpdatedAt: "2026-08-07T08:00:00.000Z",
+      updatedAt: "2026-08-07T08:05:00.000Z",
+    },
+  });
+  assert.equal(applied.status, "applied");
+  assert.ok(Object.isFrozen(applied.affected));
+
+  const crossed = clone(applied);
+  crossed.affected[0].reference = "lin-demo:face:01";
+  assert.throws(
+    () => parsePersonalModelCorrectionResponse(crossed),
     PersonalModelCardValidationError,
   );
 });

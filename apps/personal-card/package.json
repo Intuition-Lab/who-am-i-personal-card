@@ -24,7 +24,8 @@
     "./personal-model-card.schema.json": "./src/contracts/personal-model-card.schema.json",
     "./public-personal-model-card.schema.json": "./src/contracts/public-personal-model-card.schema.json",
     "./personal-model-grant.schema.json": "./src/contracts/personal-model-grant.schema.json",
-    "./personal-model-evidence.schema.json": "./src/contracts/personal-model-evidence.schema.json"
+    "./personal-model-evidence.schema.json": "./src/contracts/personal-model-evidence.schema.json",
+    "./personal-model-correction.schema.json": "./src/contracts/personal-model-correction.schema.json"
   },
   "dependencies": {
     "ajv": "8.20.0",

@@ -1,9 +1,12 @@
-import { parsePersonalModelEvidenceResponse } from "../contracts/personal-model-card.mjs";
 import { assertSafeModelId } from "../contracts/personal-model-provider.mjs";
 import {
   ConnectorIsolationError,
   assertSafeViewerSessionId,
 } from "../connectors/connector-session-service.mjs";
+import {
+  coastFrameEvidence,
+  connectorReceiptEvidence,
+} from "./evidence-record.mjs";
 
 const SAFE_FRAME_ID = /^[A-Za-z0-9_-]{1,180}$/;
 
@@ -43,6 +46,7 @@ export class EvidenceService {
   constructor({
     providerRegistry,
     sessionService,
+    eventStore = null,
     loadCoastFrame = async () => null,
   }) {
     if (typeof providerRegistry?.resolve !== "function") {
@@ -56,8 +60,12 @@ export class EvidenceService {
     if (typeof loadCoastFrame !== "function") {
       throw new TypeError("loadCoastFrame must be a function.");
     }
+    if (eventStore !== null && typeof eventStore?.readEvents !== "function") {
+      throw new TypeError("EvidenceService eventStore must support readEvents.");
+    }
     this.providerRegistry = providerRegistry;
     this.sessionService = sessionService;
+    this.eventStore = eventStore;
     this.loadCoastFrame = loadCoastFrame;
     this.coastFrames = new Map();
   }
@@ -78,6 +86,19 @@ export class EvidenceService {
         requiredScope: "evidence:read",
       },
     );
+    if (this.eventStore) {
+      const events = await this.eventStore.readEvents(connectorSession);
+      const event = events.find(
+        (candidate) => candidate.receipt === reference,
+      );
+      if (event) {
+        return connectorReceiptEvidence({
+          modelId: activeModelId,
+          reference,
+          event,
+        });
+      }
+    }
     const provider = this.providerRegistry.resolve(activeModelId);
     const evidence = await provider.getEvidence(
       activeModelId,
@@ -148,9 +169,10 @@ export class EvidenceService {
         { status: 404 },
       );
     }
-    return parsePersonalModelEvidenceResponse({
+    return coastFrameEvidence({
       modelId: activeModelId,
       reference,
+      frameId,
       content,
     });
   }

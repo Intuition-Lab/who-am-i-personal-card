@@ -235,6 +235,10 @@ if ! /usr/bin/git diff --quiet "${source_commit}" -- .; then
   exit 1
 fi
 
+# Publication assets are never built from a source tree that has not passed
+# the complete Personal Model beta gate on this macOS runner.
+bash scripts/beta-release-gate.sh
+
 repository_name="${REPOSITORY#*/}"
 package_name="who-am-i-${version}-self-contained-macos"
 dmg_name="${package_name}.dmg"
