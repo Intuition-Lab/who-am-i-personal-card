@@ -3625,8 +3625,10 @@ private struct NativeRewindView: View {
     @State private var screen: NativeRewindScreen = .month
     @State private var selectedDayID: String?
     @State private var selectedEventIndex = 0
+    @State private var monthSearch = ""
     @State private var daySearch = ""
     @State private var dayCorrection = ""
+    @FocusState private var monthSearchFocused: Bool
 
     private var days: [DaySnapshot] { snapshot.time?.days ?? [] }
 
@@ -3669,90 +3671,195 @@ private struct NativeRewindView: View {
         selectedEventIndex = 0
         daySearch = ""
         screen = .day
+        state.rewindDayRequest = nil
     }
 
     private var rewindYear: some View {
-        NativePaper(maxWidth: 900) {
-            VStack(alignment: .leading, spacing: 24) {
-                HStack(alignment: .lastTextBaseline) {
-                    Text("\(days.count) 天")
-                        .font(.system(size: 46, weight: .bold))
-                    Text("每一天都回得去\n深浅 = 那天留下的可靠记录")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("你的记忆，不用你记")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 12)
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(alignment: .lastTextBaseline, spacing: 18) {
+                            Text("\(days.count) 天")
+                                .font(.system(size: 46, weight: .bold))
+                                .tracking(-1.3)
+                            Text("每一天都回得去\n深浅 = 那天它看了多少")
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(Color.black.opacity(0.54))
+                                .lineSpacing(5)
+                            Spacer()
+                            Text("你的记忆，不用你记")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Color.black.opacity(0.26))
+                        }
+
+                        NativeYearHeatmap(
+                            days: days,
+                            referenceDate: referenceDate,
+                            select: openDay
+                        )
+                        .padding(.top, 30)
+
+                        HStack(alignment: .center, spacing: 12) {
+                            Text("只点亮当前 Personal Model 真正返回的可靠日期。")
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(Color.black.opacity(0.54))
+                            Spacer()
+                            Text("less")
+                            ForEach([0.04, 0.22, 0.50, 0.92], id: \.self) { opacity in
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(Color.blue.opacity(opacity))
+                                    .frame(width: 9, height: 9)
+                            }
+                            Text("more")
+                        }
+                        .font(.system(size: 9.5, design: .monospaced))
+                        .foregroundStyle(Color.black.opacity(0.30))
+                        .padding(.top, 20)
+                    }
+                    .padding(.horizontal, 34)
+                    .padding(.top, 30)
+                    .padding(.bottom, 26)
+                    .frame(maxWidth: 880, alignment: .topLeading)
+                    .background(
+                        .ultraThinMaterial,
+                        in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .stroke(Color.white.opacity(0.56), lineWidth: 0.7)
+                    )
+                    .shadow(color: .black.opacity(0.18), radius: 30, y: 20)
+
+                    Button("你的年报 · tap \(nativeMonthName(referenceDate).prefix(3)) to zoom back in") {
+                        screen = .month
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Color.black.opacity(0.28))
+                    .padding(.top, 14)
+                    Spacer(minLength: 64)
                 }
-                NativeYearHeatmap(days: days) { day in
-                    selectedDayID = day.id
-                    screen = .day
-                }
-                HStack {
-                    Text("只点亮当前 Personal Model 真正返回的日期。")
-                    Spacer()
-                    Button("回到这个月") { screen = .month }
-                        .buttonStyle(.borderless)
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .padding(.horizontal, 40)
+                .frame(minHeight: geometry.size.height)
+                .frame(maxWidth: .infinity)
             }
+            .scrollIndicators(.hidden)
         }
     }
 
     private var rewindMonth: some View {
-        NativePaper(maxWidth: 1020) {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(spacing: 10) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                    TextField("search memories…", text: $state.searchQuery)
-                        .textFieldStyle(.plain)
-                        .onSubmit {
-                            state.selectedSection = .card
-                            Task { await state.search() }
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 12)
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 14, weight: .regular))
+                                .foregroundStyle(Color.black.opacity(0.46))
+                                .accessibilityHidden(true)
+                            TextField("search memories…", text: $monthSearch)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 15))
+                                .focused($monthSearchFocused)
+                                .onSubmit(locateMonthSearch)
+                                .accessibilityLabel("搜索 Rewind 记忆")
+                            Button(action: locateMonthSearch) { EmptyView() }
+                                .keyboardShortcut(.defaultAction)
+                                .frame(width: 0, height: 0)
+                                .opacity(0)
+                                .accessibilityHidden(true)
                         }
-                        .accessibilityLabel("搜索 Rewind 记忆")
-                }
-                .padding(.horizontal, 13)
-                .frame(height: 42)
-                .background(Color.black.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
-                HStack(alignment: .center, spacing: 13) {
-                    Button("← \(nativeYearLabel(referenceDate))") { screen = .year }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    Text("时间 · \(nativeMonthLabel(referenceDate))")
-                        .font(.system(size: 24, weight: .bold))
-                    Spacer()
-                    Button {
-                        withAnimation(.easeOut(duration: 0.2)) { state.isMemorySkyOpen = true }
-                    } label: {
-                        Label("记忆星图", systemImage: "sparkles")
+                        .frame(height: 33)
+                        .padding(.bottom, 14)
+                        .overlay(alignment: .bottom) {
+                            Rectangle()
+                                .fill(Color.black.opacity(0.07))
+                                .frame(height: 1)
+                        }
+
+                        if monthSearchFocused {
+                            NativeRewindFilters(
+                                days: days,
+                                select: openDay
+                            )
+                            .padding(.vertical, 12)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+
+                        HStack(alignment: .firstTextBaseline, spacing: 14) {
+                            Button("← \(nativeYearLabel(referenceDate))") { screen = .year }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 10.5, design: .monospaced))
+                                .tracking(0.8)
+                                .foregroundStyle(Color.black.opacity(0.58))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 5)
+                                .overlay(
+                                    Capsule().stroke(Color.black.opacity(0.10), lineWidth: 1)
+                                )
+                            Text("时间 · \(nativeMonthName(referenceDate))")
+                                .font(.system(size: 22, weight: .semibold))
+                                .tracking(-0.45)
+                            Spacer()
+                            Button("日历与记忆星图") {
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    state.isMemorySkyOpen = true
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.black.opacity(0.42))
+                        }
+                        .padding(.top, 16)
+                        .padding(.bottom, 18)
+
+                        HStack(alignment: .top, spacing: 24) {
+                            NativeMonthCalendar(
+                                referenceDate: referenceDate,
+                                days: days,
+                                futureItems: (snapshot.now?.items ?? []).filter {
+                                    $0.isFutureLike && $0.hasReliableSuggestionSource
+                                },
+                                select: openDay
+                            )
+                            .frame(maxWidth: .infinity)
+
+                            Rectangle()
+                                .fill(Color.black.opacity(0.09))
+                                .frame(width: 1)
+                                .frame(maxHeight: .infinity)
+
+                            NativeRewindApps(
+                                days: days,
+                                themeCount: snapshot.personalModel?.faces?.count ?? 0,
+                                select: openDay
+                            )
+                            .frame(width: 240)
+                        }
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .padding(.horizontal, 30)
+                    .padding(.top, 24)
+                    .padding(.bottom, 26)
+                    .frame(maxWidth: 980, alignment: .topLeading)
+                    .background(
+                        .ultraThinMaterial,
+                        in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(Color.white.opacity(0.60), lineWidth: 0.7)
+                    )
+                    .shadow(color: .black.opacity(0.24), radius: 36, y: 24)
+                    Spacer(minLength: 64)
                 }
-                HStack(alignment: .top, spacing: 28) {
-                    NativeMonthCalendar(referenceDate: referenceDate, days: days) { day in
-                        selectedDayID = day.id
-                        selectedEventIndex = 0
-                        daySearch = ""
-                        screen = .day
-                    }
-                    .frame(maxWidth: .infinity)
-                    Divider()
-                    NativeRewindApps(days: days) { day in
-                        selectedDayID = day.id
-                        selectedEventIndex = 0
-                        screen = .day
-                    }
-                    .frame(width: 250)
-                }
-                Text("不是另一张图表。日历只标出确实存在记录的日期；未来日期不会生成虚构安排。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .padding(.horizontal, 40)
+                .frame(minHeight: geometry.size.height)
+                .frame(maxWidth: .infinity)
             }
+            .scrollIndicators(.hidden)
         }
     }
 
@@ -3778,12 +3885,12 @@ private struct NativeRewindView: View {
                     .frame(width: 270, height: 34)
                     .background(Color.black.opacity(0.035), in: RoundedRectangle(cornerRadius: 9))
                     Spacer()
-                    Text("Rewind · memory document")
+                    Text("Rewind")
                         .font(.caption2.monospaced())
                         .tracking(1.4)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Text(day.id)
+                    Text(nativeCompactDayLabel(day.id))
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
                 }
@@ -3816,6 +3923,12 @@ private struct NativeRewindView: View {
                     }
                     NativeDayModelUpdates(state: state, day: day)
                         .padding(.top, 28)
+                    NativeRewindHighlights(
+                        state: state,
+                        day: day,
+                        selectedEventIndex: $selectedEventIndex
+                    )
+                    .padding(.top, 30)
                     NativeRewindTelevision(
                         state: state,
                         day: day,
@@ -3880,54 +3993,312 @@ private struct NativeRewindView: View {
             selectedEventIndex = index
         }
     }
+
+    private func locateMonthSearch() {
+        let query = monthSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return }
+        if let day = days.first(where: { day in
+            let dayText = [day.title, day.portrait, day.letter]
+                .compactMap { $0 }
+                .joined(separator: " ")
+                .lowercased()
+            if dayText.contains(query) { return true }
+            return (day.events ?? []).contains { event in
+                [event.title, event.detail, event.app]
+                    .compactMap { $0 }
+                    .joined(separator: " ")
+                    .lowercased()
+                    .contains(query)
+            }
+        }) {
+            monthSearch = ""
+            openDay(day)
+        }
+    }
+
+    private func openDay(_ day: DaySnapshot) {
+        selectedDayID = day.id
+        selectedEventIndex = 0
+        daySearch = ""
+        monthSearchFocused = false
+        screen = .day
+    }
 }
 
 private struct NativeYearHeatmap: View {
     let days: [DaySnapshot]
+    let referenceDate: Date
     let select: (DaySnapshot) -> Void
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 5), count: 14)
+    private let calendar = Calendar(identifier: .gregorian)
+    private let weekCount = 28
+    private let gap: CGFloat = 5
+
+    private var dayByID: [String: DaySnapshot] {
+        Dictionary(uniqueKeysWithValues: days.map { ($0.id, $0) })
+    }
+
+    private var firstWeekStart: Date {
+        let end = mondayStart(for: referenceDate)
+        return calendar.date(byAdding: .weekOfYear, value: -(weekCount - 1), to: end) ?? end
+    }
 
     var body: some View {
-        LazyVGrid(columns: columns, spacing: 5) {
-            ForEach(0..<98, id: \.self) { index in
-                heatmapCell(at: index)
+        GeometryReader { proxy in
+            let cell = max(8, (proxy.size.width - CGFloat(weekCount - 1) * gap) / CGFloat(weekCount))
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: gap) {
+                    ForEach(0..<weekCount, id: \.self) { week in
+                        Text(monthLabel(for: week))
+                            .font(.system(size: 9, design: .monospaced))
+                            .tracking(0.6)
+                            .foregroundStyle(Color.black.opacity(0.30))
+                            .frame(width: cell, alignment: .leading)
+                            .lineLimit(1)
+                    }
+                }
+
+                HStack(alignment: .top, spacing: gap) {
+                    ForEach(0..<weekCount, id: \.self) { week in
+                        VStack(spacing: gap) {
+                            ForEach(0..<7, id: \.self) { weekday in
+                                heatCell(week: week, weekday: weekday, size: cell)
+                            }
+                        }
+                    }
+                }
             }
         }
+        .frame(height: 215)
     }
 
     @ViewBuilder
-    private func heatmapCell(at index: Int) -> some View {
-        if index < days.count {
-            let day = days[index]
+    private func heatCell(week: Int, weekday: Int, size: CGFloat) -> some View {
+        let date = calendar.date(
+            byAdding: .day,
+            value: week * 7 + weekday,
+            to: firstWeekStart
+        ) ?? firstWeekStart
+        let day = dayByID[dayID(date)]
+        let shape = RoundedRectangle(cornerRadius: 3)
+
+        if let day {
             Button { select(day) } label: {
-                RoundedRectangle(cornerRadius: 3)
+                shape
                     .fill(heatColor(day))
-                    .aspectRatio(1, contentMode: .fit)
+                    .frame(width: size, height: size)
+                    .overlay(
+                        shape.stroke(
+                            calendar.isDateInToday(date)
+                                ? Color.black.opacity(0.72)
+                                : .clear,
+                            lineWidth: 1
+                        )
+                    )
             }
             .buttonStyle(.plain)
             .help(day.title ?? day.id)
             .accessibilityLabel("\(day.id)，\(day.events?.count ?? 0) 条记录")
         } else {
-            RoundedRectangle(cornerRadius: 3)
+            shape
                 .fill(Color.black.opacity(0.025))
-                .aspectRatio(1, contentMode: .fit)
-                .accessibilityLabel("没有记录")
+                .frame(width: size, height: size)
+                .overlay(
+                    shape.stroke(
+                        calendar.isDateInToday(date)
+                            ? Color.black.opacity(0.44)
+                            : .clear,
+                        lineWidth: 1
+                    )
+                )
+                .accessibilityHidden(true)
         }
+    }
+
+    private func mondayStart(for date: Date) -> Date {
+        let start = calendar.startOfDay(for: date)
+        let weekday = calendar.component(.weekday, from: start)
+        let offset = (weekday + 5) % 7
+        return calendar.date(byAdding: .day, value: -offset, to: start) ?? start
+    }
+
+    private func dayID(_ date: Date) -> String {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(
+            format: "%04d-%02d-%02d",
+            components.year ?? 0,
+            components.month ?? 0,
+            components.day ?? 0
+        )
+    }
+
+    private func monthLabel(for week: Int) -> String {
+        guard let date = calendar.date(
+            byAdding: .weekOfYear,
+            value: week,
+            to: firstWeekStart
+        ) else { return "" }
+        if week > 0,
+           let previous = calendar.date(byAdding: .weekOfYear, value: week - 1, to: firstWeekStart),
+           calendar.component(.month, from: previous) == calendar.component(.month, from: date) {
+            return ""
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MMM"
+        return formatter.string(from: date).uppercased()
     }
 
     private func heatColor(_ day: DaySnapshot) -> Color {
         let count = day.events?.count ?? 0
-        return Color.blue.opacity(min(0.9, 0.22 + Double(count) * 0.16))
+        return Color.blue.opacity(min(0.92, 0.16 + Double(count) * 0.12))
+    }
+}
+
+
+private struct NativeFlowLayout: Layout {
+    var spacing: CGFloat = 7
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        let availableWidth = proposal.width ?? .infinity
+        var lineWidth: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+        var maximumWidth: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            let nextWidth = lineWidth == 0
+                ? size.width
+                : lineWidth + spacing + size.width
+            if lineWidth > 0 && nextWidth > availableWidth {
+                maximumWidth = max(maximumWidth, lineWidth)
+                totalHeight += lineHeight + spacing
+                lineWidth = size.width
+                lineHeight = size.height
+            } else {
+                lineWidth = nextWidth
+                lineHeight = max(lineHeight, size.height)
+            }
+        }
+        maximumWidth = max(maximumWidth, lineWidth)
+        totalHeight += lineHeight
+        return CGSize(
+            width: availableWidth.isFinite ? availableWidth : maximumWidth,
+            height: totalHeight
+        )
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var lineHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX && x + spacing + size.width > bounds.maxX {
+                x = bounds.minX
+                y += lineHeight + spacing
+                lineHeight = 0
+            } else if x > bounds.minX {
+                x += spacing
+            }
+            subview.place(
+                at: CGPoint(x: x, y: y),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(size)
+            )
+            x += size.width
+            lineHeight = max(lineHeight, size.height)
+        }
+    }
+}
+
+private struct NativeRewindFilters: View {
+    let days: [DaySnapshot]
+    let select: (DaySnapshot) -> Void
+
+    private var recentDays: [DaySnapshot] {
+        Array(days.sorted { $0.id > $1.id }.prefix(3))
+    }
+
+    private var recentApps: [(name: String, day: DaySnapshot)] {
+        var seen = Set<String>()
+        var output: [(String, DaySnapshot)] = []
+        for day in days.sorted(by: { $0.id > $1.id }) {
+            for event in day.events ?? [] {
+                guard let app = event.app?.trimmedNonEmpty, seen.insert(app).inserted else {
+                    continue
+                }
+                output.append((app, day))
+                if output.count == 6 { return output }
+            }
+        }
+        return output
+    }
+
+    var body: some View {
+        NativeFlowLayout(spacing: 7) {
+                ForEach(Array(recentDays.enumerated()), id: \.element.id) { index, day in
+                    Button(index == 0 ? "最近一天" : nativeCompactDayLabel(day.id)) {
+                        select(day)
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.black.opacity(0.76))
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 5)
+                    .background(.white.opacity(0.74), in: Capsule())
+                    .overlay(Capsule().stroke(Color.black.opacity(0.08)))
+                }
+
+                if !recentDays.isEmpty && !recentApps.isEmpty {
+                    Rectangle()
+                        .fill(Color.black.opacity(0.09))
+                        .frame(width: 1, height: 16)
+                        .padding(.horizontal, 3)
+                }
+
+                ForEach(recentApps, id: \.name) { app in
+                    Button {
+                        select(app.day)
+                    } label: {
+                        HStack(spacing: 7) {
+                            NativeActivityIcon(text: app.name)
+                                .scaleEffect(0.76)
+                                .frame(width: 22, height: 22)
+                            Text(app.name).lineLimit(1)
+                        }
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.black.opacity(0.76))
+                        .padding(.leading, 5)
+                        .padding(.trailing, 12)
+                        .padding(.vertical, 4)
+                        .background(.white.opacity(0.74), in: Capsule())
+                        .overlay(Capsule().stroke(Color.black.opacity(0.08)))
+                    }
+                    .buttonStyle(.plain)
+                }
+        }
     }
 }
 
 private struct NativeMonthCalendar: View {
     let referenceDate: Date
     let days: [DaySnapshot]
+    let futureItems: [NowItem]
     let select: (DaySnapshot) -> Void
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
     private let calendar = Calendar(identifier: .gregorian)
 
     private var dayByNumber: [Int: DaySnapshot] {
@@ -3939,64 +4310,179 @@ private struct NativeMonthCalendar: View {
         })
     }
 
+    private var futureByNumber: [Int: [NowItem]] {
+        var output: [Int: [NowItem]] = [:]
+        for item in futureItems {
+            guard let dayID = item.dayId,
+                  let date = nativeDayDate(dayID),
+                  calendar.isDate(date, equalTo: referenceDate, toGranularity: .month)
+            else { continue }
+            output[calendar.component(.day, from: date), default: []].append(item)
+        }
+        return output
+    }
+
     private var cells: [Int?] {
         guard let interval = calendar.dateInterval(of: .month, for: referenceDate) else { return [] }
         let count = calendar.range(of: .day, in: .month, for: referenceDate)?.count ?? 30
         let weekday = calendar.component(.weekday, from: interval.start)
         let mondayOffset = (weekday + 5) % 7
-        return Array(repeating: nil, count: mondayOffset) + (1...count).map(Optional.some)
+        var result = Array(repeating: Optional<Int>.none, count: mondayOffset)
+        result.append(contentsOf: (1...count).map(Optional.some))
+        while !result.count.isMultiple(of: 7) { result.append(nil) }
+        return result
     }
 
     var body: some View {
-        VStack(spacing: 8) {
-            LazyVGrid(columns: columns, spacing: 4) {
-                ForEach(["M", "T", "W", "T", "F", "S", "S"], id: \.self) { label in
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Color.black.opacity(0.10))
+                .frame(height: 1)
+
+            LazyVGrid(columns: columns, spacing: 0) {
+                ForEach(Array(["M", "T", "W", "T", "F", "S", "S"].enumerated()), id: \.offset) { _, label in
                     Text(label)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 9, design: .monospaced))
+                        .tracking(0.8)
+                        .foregroundStyle(Color.black.opacity(0.28))
                         .frame(maxWidth: .infinity)
+                        .padding(.top, 12)
                         .padding(.bottom, 6)
                 }
+
                 ForEach(Array(cells.enumerated()), id: \.offset) { _, number in
                     if let number {
-                        let day = dayByNumber[number]
-                        Button {
-                            if let day { select(day) }
-                        } label: {
-                            VStack(spacing: 6) {
-                                Text("\(number)")
-                                    .font(.caption.monospacedDigit())
-                                Circle()
-                                    .fill(day == nil ? Color.clear : Color.primary)
-                                    .frame(width: 4, height: 4)
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 54)
-                            .background(
-                                day == nil ? Color.clear : Color.black.opacity(0.035),
-                                in: RoundedRectangle(cornerRadius: 9)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(day == nil)
-                        .help(day?.portrait ?? "没有记录")
+                        calendarDay(number)
                     } else {
-                        Color.clear.frame(minHeight: 54)
+                        Color.clear.frame(height: 52).accessibilityHidden(true)
                     }
                 }
             }
+
             HStack(spacing: 16) {
-                Label("留下过记忆", systemImage: "circle.fill")
-                Label("点日期进入当天", systemImage: "arrow.turn.down.right")
+                HStack(spacing: 5) {
+                    Circle().fill(Color(red: 0.17, green: 0.17, blue: 0.18))
+                        .frame(width: 3, height: 3)
+                    Text("留下过记忆")
+                }
+                HStack(spacing: 5) {
+                    RoundedRectangle(cornerRadius: 2.5)
+                        .stroke(Color.black.opacity(0.88), lineWidth: 1.2)
+                        .frame(width: 8, height: 8)
+                    Text("今天")
+                }
+                HStack(spacing: 5) {
+                    VStack(spacing: 2) {
+                        ForEach(0..<3, id: \.self) { _ in
+                            Capsule().fill(Color.black.opacity(0.48))
+                                .frame(width: 8, height: 1)
+                        }
+                    }
+                    Text("明天的影子")
+                }
                 Spacer()
             }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
+            .font(.system(size: 10.5))
+            .foregroundStyle(Color.black.opacity(0.28))
+            .padding(.top, 16)
         }
+    }
+
+    @ViewBuilder
+    private func calendarDay(_ number: Int) -> some View {
+        let day = dayByNumber[number]
+        let future = futureByNumber[number] ?? []
+        let today = isToday(number)
+
+        if let day {
+            Button { select(day) } label: {
+                dayLabel(number, hasMemory: true, futureCount: future.count, isToday: today)
+            }
+            .buttonStyle(.plain)
+            .help(day.portrait ?? day.title ?? day.id)
+            .accessibilityLabel("\(number)，留下过记忆\(today ? "，今天" : "")")
+        } else {
+            dayLabel(number, hasMemory: false, futureCount: future.count, isToday: today)
+                .help(future.first?.displayTitle ?? (today ? "今天" : "没有记录"))
+                .accessibilityLabel(
+                    future.isEmpty
+                        ? "\(number)\(today ? "，今天" : "，没有记录")"
+                        : "\(number)，有来源的延续建议"
+                )
+        }
+    }
+
+    private func dayLabel(
+        _ number: Int,
+        hasMemory: Bool,
+        futureCount: Int,
+        isToday: Bool
+    ) -> some View {
+        ZStack(alignment: .topTrailing) {
+            VStack(spacing: 3) {
+                Text("\(number)")
+                    .font(.system(size: 12, weight: hasMemory || futureCount > 0 || isToday ? .semibold : .regular))
+                    .foregroundStyle(
+                        hasMemory
+                            ? Color.white
+                            : futureCount > 0
+                                ? Color.black.opacity(0.66)
+                                : isToday
+                                    ? Color.black.opacity(0.88)
+                                    : Color.black.opacity(0.28)
+                    )
+                    .frame(width: 26, height: 26)
+                    .background(
+                        hasMemory ? Color(red: 0.17, green: 0.17, blue: 0.18) : .clear,
+                        in: RoundedRectangle(cornerRadius: 8)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(
+                                futureCount > 0 && !hasMemory
+                                    ? Color.black.opacity(0.22)
+                                    : isToday && !hasMemory
+                                        ? Color.black.opacity(0.88)
+                                        : .clear,
+                                lineWidth: isToday && !hasMemory ? 1.5 : 1
+                            )
+                    )
+                    .shadow(
+                        color: hasMemory ? Color.black.opacity(0.28) : .clear,
+                        radius: 7,
+                        y: 4
+                    )
+                Circle()
+                    .fill(isToday ? Color.black.opacity(0.9) : .clear)
+                    .frame(width: 3, height: 3)
+            }
+
+            if futureCount > 0 {
+                VStack(spacing: 2) {
+                    ForEach(0..<min(3, futureCount), id: \.self) { _ in
+                        Capsule().fill(Color.black.opacity(0.48))
+                            .frame(width: 7, height: 1)
+                    }
+                }
+                .padding(.top, 7)
+                .padding(.trailing, 5)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 52)
+        .contentShape(RoundedRectangle(cornerRadius: 9))
+    }
+
+    private func isToday(_ number: Int) -> Bool {
+        guard let month = calendar.dateInterval(of: .month, for: referenceDate),
+              let date = calendar.date(byAdding: .day, value: number - 1, to: month.start)
+        else { return false }
+        return calendar.isDateInToday(date)
     }
 }
 
 private struct NativeRewindApps: View {
     let days: [DaySnapshot]
+    let themeCount: Int
     let select: (DaySnapshot) -> Void
 
     private var rows: [(app: String, count: Int, day: DaySnapshot)] {
@@ -4008,44 +4494,145 @@ private struct NativeRewindApps: View {
                 counts[app] = (previous + 1, day)
             }
         }
-        return counts.map { ($0.key, $0.value.0, $0.value.1) }.sorted { $0.count > $1.count }
+        return counts
+            .map { ($0.key, $0.value.0, $0.value.1) }
+            .sorted {
+                if $0.count == $1.count { return $0.app < $1.app }
+                return $0.count > $1.count
+            }
+    }
+
+    private var note: String {
+        guard themeCount > 0 else {
+            return "等待 Personal Model 返回个人主题。"
+        }
+        let recentDayCount = min(7, Set(days.map(\.id)).count)
+        return "\(themeCount) 个实时主题 · 来自最近 \(recentDayCount) 个有记录日期的 Personal Model 活动；数量只表示当前记录密度。"
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("最近围绕的事")
-                .font(.caption2.monospaced())
+                .font(.system(size: 9.5, design: .monospaced))
                 .tracking(1.4)
-            Text("这里按真实事件来源聚合，不根据缺失记录猜测使用时长。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineSpacing(4)
-                .padding(.vertical, 10)
-            if rows.isEmpty {
-                NativeInlineState(
-                    symbol: "clock.arrow.circlepath",
-                    title: "还没有可回绕的记录",
-                    detail: "可靠活动出现后，会按来源显示在这里。"
-                )
-            }
-            ForEach(rows, id: \.app) { row in
+                .foregroundStyle(Color.black.opacity(0.42))
+            Text("不是另一张图表。它只是让你看见，这个月的时间流向了哪里。")
+                .font(.system(size: 12))
+                .foregroundStyle(Color.black.opacity(0.40))
+                .lineSpacing(5)
+                .padding(.top, 8)
+                .padding(.bottom, 13)
+
+            ForEach(Array(rows.prefix(6)), id: \.app) { row in
                 Button { select(row.day) } label: {
                     HStack(spacing: 10) {
-                        RoundedRectangle(cornerRadius: 7)
-                            .fill(Color.black.opacity(0.08))
-                            .frame(width: 29, height: 29)
-                            .overlay(Text(String(row.app.prefix(1))).font(.caption.weight(.bold)))
-                        Text(row.app).font(.callout.weight(.semibold)).lineLimit(1)
-                        Spacer()
+                        NativeActivityIcon(text: row.app)
+                        Text(row.app)
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(Color.black.opacity(0.82))
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
                         Text("\(row.count) 段")
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 9.5, design: .monospaced))
+                            .foregroundStyle(Color.black.opacity(0.42))
                     }
-                    .padding(.vertical, 9)
+                    .padding(.vertical, 10)
                     .contentShape(Rectangle())
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(Color.black.opacity(0.08)).frame(height: 1)
+                    }
                 }
                 .buttonStyle(.plain)
-                Divider()
+            }
+
+            Text(note)
+                .font(.system(size: 13, design: .serif))
+                .foregroundStyle(Color.black.opacity(0.58))
+                .lineSpacing(7)
+                .padding(.top, 14)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(Color.black.opacity(0.10)).frame(height: 1)
+                }
+        }
+    }
+}
+
+
+private struct NativeRewindHighlights: View {
+    @ObservedObject var state: PersonalModelAppState
+    let day: DaySnapshot
+    @Binding var selectedEventIndex: Int
+
+    private var highlights: [(index: Int, event: EventSnapshot)] {
+        var seen = Set<String>()
+        var output: [(Int, EventSnapshot)] = []
+        for (index, event) in (day.events ?? []).enumerated() {
+            let key = "\(event.app ?? "")|\(event.title)".lowercased()
+            guard seen.insert(key).inserted else { continue }
+            output.append((index, event))
+        }
+        return output
+    }
+
+    var body: some View {
+        if !highlights.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text("值得回去的瞬间")
+                        .font(.system(size: 18, weight: .semibold))
+                        .tracking(-0.35)
+                    Text("每件事只出现一次 · 点一下回到画面")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.black.opacity(0.34))
+                    Spacer()
+                }
+                .padding(.bottom, 8)
+
+                ForEach(Array(highlights.enumerated()), id: \.element.event.id) { displayIndex, highlight in
+                    HStack(alignment: .top, spacing: 13) {
+                        Button {
+                            selectedEventIndex = highlight.index
+                        } label: {
+                            HStack(alignment: .top, spacing: 13) {
+                                Text(highlight.event.time ?? "—")
+                                    .font(.system(size: 9.5, design: .monospaced))
+                                    .foregroundStyle(Color.black.opacity(0.42))
+                                    .frame(width: 44, alignment: .leading)
+                                    .padding(.top, 2)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(highlight.event.title)
+                                        .font(.system(size: 13.5, weight: .medium))
+                                        .foregroundStyle(Color.black.opacity(0.84))
+                                    Text(highlight.event.detail?.trimmedNonEmpty ?? "这条记录没有附加描述。")
+                                        .font(.system(size: 11.5))
+                                        .foregroundStyle(Color.black.opacity(0.42))
+                                        .lineLimit(1)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                Text("\(String(format: "%02d", displayIndex + 1)) ↗")
+                                    .font(.system(size: 8.5, design: .monospaced))
+                                    .foregroundStyle(Color.black.opacity(0.28))
+                                    .padding(.top, 2)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+
+                        if let reference = highlight.event.evidenceRef {
+                            Button("✦ 证据") {
+                                Task { await state.loadEvidence(reference) }
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(Color.black.opacity(0.58))
+                            .padding(.top, 1)
+                        }
+                    }
+                    .padding(.vertical, 12)
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(Color.black.opacity(0.09)).frame(height: 1)
+                    }
+                }
             }
         }
     }
@@ -4054,6 +4641,7 @@ private struct NativeRewindApps: View {
 private struct NativeDayModelUpdates: View {
     @ObservedObject var state: PersonalModelAppState
     let day: DaySnapshot
+    @State private var selectedEventID: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -4061,7 +4649,7 @@ private struct NativeDayModelUpdates: View {
                 Text("今天写进 Personal Model")
                     .font(.title3.weight(.semibold))
                 Spacer()
-                Text("每一条都保留类型与来源")
+                Text(selectedEventID == nil ? "点一句划线" : "已划线 · 点右侧生成分享卡")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -4078,15 +4666,30 @@ private struct NativeDayModelUpdates: View {
                             .font(.system(size: 15, design: .serif))
                             .foregroundStyle(.secondary)
                             .lineSpacing(6)
+                            .underline(selectedEventID == event.id, color: .primary.opacity(0.55))
                         NativeTruthBadge(metadata: event.truthMetadata(day: day))
                     }
                     Spacer()
-                    if let reference = event.evidenceRef {
-                        Button("溯源") { Task { await state.loadEvidence(reference) } }
+                    VStack(alignment: .trailing, spacing: 8) {
+                        if let reference = event.evidenceRef {
+                            Button("溯源 ↗") { Task { await state.loadEvidence(reference) } }
+                                .buttonStyle(.borderless)
+                        }
+                        if selectedEventID == event.id {
+                            Button("划线分享 ↗") {
+                                state.openShare(
+                                    highlight: event.detail?.trimmedNonEmpty ?? event.title
+                                )
+                            }
                             .buttonStyle(.borderless)
+                        }
                     }
                 }
                 .padding(.vertical, 15)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    selectedEventID = selectedEventID == event.id ? nil : event.id
+                }
                 Divider()
             }
         }
@@ -4099,108 +4702,222 @@ private struct NativeRewindTelevision: View {
     @Binding var selectedEventIndex: Int
 
     private var events: [EventSnapshot] { day.events ?? [] }
+
+    private var currentIndex: Int {
+        guard !events.isEmpty else { return 0 }
+        return min(max(0, selectedEventIndex), events.count - 1)
+    }
+
     private var selectedEvent: EventSnapshot? {
         guard !events.isEmpty else { return nil }
-        return events[min(max(0, selectedEventIndex), events.count - 1)]
+        return events[currentIndex]
+    }
+
+    private var appRows: [(name: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for event in events {
+            counts[event.app?.trimmedNonEmpty ?? "Personal Model", default: 0] += 1
+        }
+        return counts
+            .map { ($0.key, $0.value) }
+            .sorted {
+                if $0.count == $1.count { return $0.name < $1.name }
+                return $0.count > $1.count
+            }
+    }
+
+    private var chapterLabel: String {
+        events.isEmpty ? "0 / 0" : "\(currentIndex + 1) / \(events.count)"
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 21)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(red: 0.22, green: 0.22, blue: 0.23), Color(red: 0.06, green: 0.06, blue: 0.07)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(spacing: 0) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 13)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.16, green: 0.16, blue: 0.17),
+                                    Color(red: 0.055, green: 0.055, blue: 0.065),
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
-                    )
-                VStack(spacing: 0) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 13)
-                            .fill(Color(red: 0.075, green: 0.075, blue: 0.085))
-                        if let selectedEvent {
-                            VStack(spacing: 11) {
-                                Text((selectedEvent.app ?? "Personal Model").uppercased())
-                                    .font(.caption2.monospaced())
-                                    .tracking(2)
-                                    .foregroundStyle(.white.opacity(0.36))
-                                Text(selectedEvent.title)
-                                    .font(.system(size: 24, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.92))
-                                    .multilineTextAlignment(.center)
-                                Text(selectedEvent.detail?.trimmedNonEmpty ?? "这条记录没有可显示的画面描述。")
-                                    .font(.callout)
-                                    .foregroundStyle(.white.opacity(0.52))
-                                    .multilineTextAlignment(.center)
-                                    .frame(maxWidth: 560)
-                            }
-                            .padding(40)
-                            VStack {
-                                HStack {
-                                    Label(selectedEvent.app ?? "Personal Model", systemImage: "record.circle")
-                                    Spacer()
+
+                    if let selectedEvent {
+                        VStack(spacing: 10) {
+                            Text(selectedEvent.title)
+                                .font(.system(size: 22, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.94))
+                                .multilineTextAlignment(.center)
+                            Text(
+                                selectedEvent.detail?.trimmedNonEmpty
+                                    ?? "这条记录没有可显示的画面描述。"
+                            )
+                            .font(.system(size: 13))
+                            .lineSpacing(6)
+                            .foregroundStyle(.white.opacity(0.54))
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 560)
+                        }
+                        .padding(40)
+
+                        VStack {
+                            HStack {
+                                HStack(spacing: 8) {
+                                    Circle()
+                                        .fill(Color.white.opacity(0.84))
+                                        .frame(width: 6, height: 6)
+                                    Text(selectedEvent.app ?? "Personal Model")
+                                        .font(.system(size: 11.5, weight: .medium))
                                     Text(selectedEvent.time ?? "—")
+                                        .font(.system(size: 9.5, design: .monospaced))
+                                        .foregroundStyle(.white.opacity(0.55))
                                 }
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.white.opacity(0.62))
-                                .padding(14)
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(.black.opacity(0.56), in: RoundedRectangle(cornerRadius: 9))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 9)
+                                        .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
+                                )
                                 Spacer()
                             }
-                        } else {
-                            Text("这一天没有可回放的可靠片段")
-                                .foregroundStyle(.white.opacity(0.5))
+                            Spacer()
+                            HStack(spacing: 12) {
+                                Text(selectedEvent.title)
+                                    .font(.system(size: 12))
+                                    .lineLimit(1)
+                                Spacer()
+                                Text(chapterLabel)
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(.white.opacity(0.48))
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 9)
+                            .background(.black.opacity(0.56), in: RoundedRectangle(cornerRadius: 10))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
+                            )
                         }
+                        .padding(12)
+                    } else {
+                        Text("这一天没有可回放的可靠片段")
+                            .foregroundStyle(.white.opacity(0.50))
                     }
-                    .padding(10)
-                    .aspectRatio(16 / 9, contentMode: .fit)
-                    HStack(spacing: 10) {
-                        Label("WHO AM I · REWIND", systemImage: "circle.fill")
-                        Text("CH \(events.isEmpty ? "—" : "\(selectedEventIndex + 1)/\(events.count)")")
-                            .foregroundStyle(.white.opacity(0.3))
-                        Spacer()
+                }
+                .aspectRatio(16 / 9, contentMode: .fit)
+                .padding(10)
+
+                HStack(spacing: 10) {
+                    HStack(spacing: 6) {
+                        Circle().fill(Color.white.opacity(0.72)).frame(width: 5, height: 5)
+                        Text("WHO AM I · REWIND")
+                    }
+                    Text("CH \(chapterLabel)")
+                        .foregroundStyle(.white.opacity(0.26))
+                    Spacer()
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.fixed(3), spacing: 3), count: 6),
+                        spacing: 3
+                    ) {
                         ForEach(0..<12, id: \.self) { _ in
                             Circle().fill(.black.opacity(0.55)).frame(width: 3, height: 3)
                         }
-                        Circle().fill(.gray).frame(width: 16, height: 16)
-                        Circle().fill(.gray).frame(width: 16, height: 16)
                     }
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.white.opacity(0.5))
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 9)
+                    NativeTelevisionKnob(rotation: 0)
+                    NativeTelevisionKnob(rotation: 52)
                 }
+                .font(.system(size: 7.5, design: .monospaced))
+                .tracking(0.9)
+                .foregroundStyle(.white.opacity(0.50))
+                .padding(.horizontal, 14)
+                .padding(.bottom, 9)
             }
+            .background(
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.22, green: 0.22, blue: 0.23),
+                        Color(red: 0.06, green: 0.06, blue: 0.07),
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                in: RoundedRectangle(cornerRadius: 21)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 21)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 0.7)
+            )
+            .shadow(color: .black.opacity(0.32), radius: 22, y: 15)
+
             if let selectedEvent {
-                HStack(alignment: .top) {
+                HStack(alignment: .top, spacing: 18) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(selectedEvent.title).font(.headline)
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Text(selectedEvent.title)
+                                .font(.system(size: 17, weight: .semibold))
+                                .tracking(-0.3)
+                            Text(selectedEvent.time ?? "—")
+                                .font(.system(size: 9.5, design: .monospaced))
+                                .foregroundStyle(Color.black.opacity(0.34))
+                        }
                         Text(selectedEvent.detail?.trimmedNonEmpty ?? "没有附加描述")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(Color.black.opacity(0.44))
+                            .lineLimit(1)
                     }
                     Spacer()
-                    Button { selectedEventIndex = max(0, selectedEventIndex - 1) } label: {
-                        Image(systemName: "chevron.left.circle")
+                    HStack(spacing: 7) {
+                        Button {
+                            selectedEventIndex = max(0, currentIndex - 1)
+                        } label: {
+                            Text("‹")
+                                .font(.system(size: 20))
+                                .frame(width: 30, height: 30)
+                                .overlay(Circle().stroke(Color.black.opacity(0.14)))
+                        }
+                        .disabled(currentIndex == 0)
+                        Button {
+                            selectedEventIndex = min(events.count - 1, currentIndex + 1)
+                        } label: {
+                            Text("›")
+                                .font(.system(size: 20))
+                                .frame(width: 30, height: 30)
+                                .overlay(Circle().stroke(Color.black.opacity(0.14)))
+                        }
+                        .disabled(currentIndex >= events.count - 1)
                     }
-                    .disabled(selectedEventIndex == 0)
-                    Button { selectedEventIndex = min(events.count - 1, selectedEventIndex + 1) } label: {
-                        Image(systemName: "chevron.right.circle")
-                    }
-                    .disabled(selectedEventIndex >= events.count - 1)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.black.opacity(0.58))
                 }
-                .buttonStyle(.borderless)
-                HStack(spacing: 3) {
+                .padding(.top, 17)
+
+                HStack(spacing: 2) {
                     ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
                         Button { selectedEventIndex = index } label: {
                             Capsule()
-                                .fill(index == selectedEventIndex ? Color.primary : Color.primary.opacity(0.16))
+                                .fill(
+                                    index == currentIndex
+                                        ? Color.black.opacity(0.82)
+                                        : Color.black.opacity(0.16)
+                                )
                                 .frame(maxWidth: .infinity, minHeight: 8, maxHeight: 8)
                         }
                         .buttonStyle(.plain)
                         .help("\(event.time ?? "—") · \(event.title)")
                     }
                 }
+                .padding(3)
+                .frame(height: 14)
+                .background(Color.black.opacity(0.06), in: Capsule())
+                .padding(.top, 16)
+
                 HStack {
                     Text(events.first?.time ?? "—")
                     Spacer()
@@ -4208,8 +4925,34 @@ private struct NativeRewindTelevision: View {
                     Spacer()
                     Text(events.last?.time ?? "—")
                 }
-                .font(.caption2.monospaced())
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(Color.black.opacity(0.26))
+                .padding(.top, 7)
+
+                HStack(spacing: 15) {
+                    ForEach(Array(appRows.prefix(7)), id: \.name) { app in
+                        HStack(spacing: 6) {
+                            NativeActivityIcon(text: app.name)
+                                .scaleEffect(0.62)
+                                .frame(width: 18, height: 18)
+                            Text(app.name).lineLimit(1)
+                            Text("\(app.count) 段").fontWeight(.medium)
+                        }
+                        .font(.system(size: 11))
+                        .foregroundStyle(
+                            app.name == selectedEvent.app
+                                ? Color.black.opacity(0.86)
+                                : Color.black.opacity(0.43)
+                        )
+                    }
+                    Spacer(minLength: 0)
+                    Text(day.source?.trimmedNonEmpty ?? "Personal Model · 本机记录")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.black.opacity(0.28))
+                        .lineLimit(1)
+                }
+                .padding(.top, 14)
+
                 if let reference = selectedEvent.evidenceRef {
                     Button {
                         Task { await state.loadEvidence(reference) }
@@ -4217,11 +4960,44 @@ private struct NativeRewindTelevision: View {
                         Label("打开这个片段的 Evidence", systemImage: "checkmark.seal")
                     }
                     .buttonStyle(.borderless)
+                    .padding(.top, 13)
                 }
             }
         }
     }
 }
+
+private struct NativeTelevisionKnob: View {
+    let rotation: Double
+
+    var body: some View {
+        Circle()
+            .fill(
+                RadialGradient(
+                    colors: [
+                        Color(red: 0.56, green: 0.55, blue: 0.52),
+                        Color(red: 0.28, green: 0.28, blue: 0.27),
+                        Color(red: 0.13, green: 0.13, blue: 0.13),
+                    ],
+                    center: UnitPoint(x: 0.38, y: 0.32),
+                    startRadius: 1,
+                    endRadius: 11
+                )
+            )
+            .frame(width: 16, height: 16)
+            .overlay(alignment: .top) {
+                Capsule()
+                    .fill(Color.white.opacity(0.50))
+                    .frame(width: 1, height: 5)
+                    .padding(.top, 2)
+            }
+            .rotationEffect(.degrees(rotation))
+            .overlay(Circle().stroke(Color.white.opacity(0.14), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.55), radius: 2, y: 1)
+            .accessibilityHidden(true)
+    }
+}
+
 
 private func nativeDayDate(_ id: String) -> Date? {
     let formatter = DateFormatter()
@@ -4235,6 +5011,21 @@ private func nativeYearLabel(_ date: Date) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "zh_CN")
     formatter.dateFormat = "yyyy"
+    return formatter.string(from: date)
+}
+
+private func nativeMonthName(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "MMMM"
+    return formatter.string(from: date).uppercased()
+}
+
+private func nativeCompactDayLabel(_ id: String) -> String {
+    guard let date = nativeDayDate(id) else { return id }
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "zh_CN")
+    formatter.dateFormat = "M月d日"
     return formatter.string(from: date)
 }
 

@@ -104,8 +104,12 @@ test("native app preserves the original V5 interaction surfaces without a WebVie
     "NativeShareView",
     "NativeIdentityView",
     "NativeYearHeatmap",
+    "NativeFlowLayout",
+    "NativeRewindFilters",
     "NativeMonthCalendar",
+    "NativeRewindHighlights",
     "NativeRewindTelevision",
+    "NativeTelevisionKnob",
     "NativeMemorySky",
     "NativeConstellationTheme",
     "NativeCorrectionToast",
@@ -131,7 +135,11 @@ test("native app preserves the original V5 interaction surfaces without a WebVie
     'case "klein"',
     'case "graphite"',
     "Search this day",
+    "search memories…",
+    "日历与记忆星图",
     "今天写进 Personal Model",
+    "值得回去的瞬间",
+    "每件事只出现一次 · 点一下回到画面",
     "ROOT · 今天留下的一句",
     "ROOT · 我是谁",
     "← → 巡星",
@@ -145,6 +153,9 @@ test("native app preserves the original V5 interaction surfaces without a WebVie
   assert.doesNotMatch(nativeUI, /WKWebView|WebKit/);
   assert.match(nativeUI, /state\.isMemorySkyOpen[\s\S]*accessibilityHidden/);
   assert.match(nativeUI, /onExitCommand/);
+  assert.match(nativeUI, /state\.rewindDayRequest = nil/);
+  assert.match(nativeUI, /nativeMonthName\(referenceDate\)/);
+  assert.match(nativeUI, /let weekCount = 28/);
   assert.match(nativeUI, /frame\(width: 430, height: 430 \/ 1\.586\)/);
   assert.match(nativeUI, /\(28, 40, 16, 34\)/);
   assert.match(nativeUI, /\(66, 56, 14, 26\)/);
