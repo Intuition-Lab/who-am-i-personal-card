@@ -29,6 +29,7 @@ test("release asset construction is blocked by the complete beta gate", async ()
     assert.match(gate, new RegExp(requiredGate));
   }
   assert.match(gate, /\[beta gate\] FAIL:/);
+  assert.match(gate, /NativeLifecycle\.swift/);
   assert.match(builder, /bash scripts\/beta-release-gate\.sh/);
   assert.ok(
     builder.indexOf("bash scripts/beta-release-gate.sh") <

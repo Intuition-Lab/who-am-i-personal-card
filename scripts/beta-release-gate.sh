@@ -173,7 +173,8 @@ swift_typecheck() {
     -framework Cocoa \
     -framework SwiftUI \
     "${PRODUCT_ROOT}/apps/personal-card/macos/WhoAmIApp.swift" \
-    "${PRODUCT_ROOT}/apps/personal-card/macos/WhoAmINativeUI.swift"
+    "${PRODUCT_ROOT}/apps/personal-card/macos/WhoAmINativeUI.swift" \
+    "${PRODUCT_ROOT}/apps/personal-card/macos/NativeLifecycle.swift"
 }
 
 native_launcher() {
