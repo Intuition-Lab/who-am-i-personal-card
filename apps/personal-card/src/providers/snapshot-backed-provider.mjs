@@ -7,6 +7,11 @@ import {
   PersonalModelProviderError,
   assertSafeModelId,
 } from "../contracts/personal-model-provider.mjs";
+import {
+  normalizeSearchOptions,
+  normalizeSearchResults,
+  publicSearchResult,
+} from "../content/personal-model-content-backend.mjs";
 
 export function freezeCopy(value) {
   const copy = structuredClone(value);
@@ -163,7 +168,7 @@ export class SnapshotBackedPersonalModelProvider extends PersonalModelProvider {
     });
   }
 
-  async search(modelId, query, grant, options) {
+  async search(modelId, query, grant, options = {}) {
     assertSafeModelId(modelId);
     if (typeof query !== "string" || query.trim().length === 0) {
       throw new PersonalModelProviderError(
@@ -173,13 +178,14 @@ export class SnapshotBackedPersonalModelProvider extends PersonalModelProvider {
       );
     }
 
+    const searchOptions = normalizeSearchOptions(options);
     const snapshot = await this.getSnapshot(modelId, grant, options);
     const terms = query
       .trim()
       .toLocaleLowerCase()
       .split(/\s+/u)
       .filter(Boolean);
-    const results = searchableEntries(snapshot)
+    const matches = searchableEntries(snapshot)
       .filter((entry) => {
         const haystack = `${entry.title}\n${entry.text}`.toLocaleLowerCase();
         return terms.every((term) => haystack.includes(term));
@@ -188,6 +194,12 @@ export class SnapshotBackedPersonalModelProvider extends PersonalModelProvider {
         modelId: snapshot.model.id,
         ...entry,
       }));
+    const results = normalizeSearchResults({
+      modelId,
+      payload: matches,
+      topK: searchOptions.topK,
+      method: "snapshot-keyword-search",
+    }).map(publicSearchResult);
 
     return freezeCopy(results);
   }

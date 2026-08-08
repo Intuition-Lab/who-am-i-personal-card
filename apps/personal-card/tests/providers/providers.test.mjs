@@ -203,6 +203,114 @@ test("LocalPersomeProvider sanitizes mutable operation failures", async () => {
   );
 });
 
+test("LocalPersomeProvider returns complete deduplicated semantic results with evidence metadata", async () => {
+  let received;
+  const fullBody = "A complete durable memory body with the project decision, source context, and supporting detail.";
+  const provider = createLocalProvider({
+    operations: {
+      search: async (request) => {
+        received = request;
+        return [
+          {
+            modelId: "cecilia",
+            id: "semantic-1",
+            content: fullBody,
+            path: "project-personal-card.md",
+            timestamp: "2026-08-09T08:00:00+08:00",
+            confidence: 0.93,
+          },
+          {
+            modelId: "cecilia",
+            id: "semantic-1",
+            content: fullBody,
+            path: "project-personal-card.md",
+          },
+          {
+            modelId: "lin-demo",
+            id: "foreign-result",
+            content: "must never cross models",
+          },
+        ];
+      },
+    },
+  });
+
+  const results = await provider.search("cecilia", "semantic decision", undefined, {
+    top_k: 2,
+    breadth: 0.4,
+  });
+  assert.equal(received.modelId, "cecilia");
+  assert.equal(received.options.topK, 2);
+  assert.equal(received.options.breadth, 0.4);
+  assert.equal(results.length, 1);
+  assert.equal(results[0].text, fullBody);
+  assert.equal(results[0].body, fullBody);
+  assert.equal(results[0].contentType, "observed");
+  assert.equal(results[0].confidence, 0.93);
+  assert.deepEqual(results[0].timeRange, {
+    start: "2026-08-09T08:00:00+08:00",
+    end: "2026-08-09T08:00:00+08:00",
+  });
+  assert.match(results[0].evidenceRefs[0], /^cecilia:memory:/u);
+  assert.equal(JSON.stringify(results).includes("foreign-result"), false);
+});
+
+test("LocalPersomeProvider ask is evidence-bound and refuses when retrieval is empty", async () => {
+  const grounded = createLocalProvider({
+    operations: {
+      ask: async () => {
+        throw new Error("owner ask unavailable with private details");
+      },
+      search: async ({ modelId }) => [{
+        modelId,
+        id: "answer-evidence",
+        text: "Cecilia chose the Personal Card beta boundary after reviewing field evidence.",
+        evidenceRefs: [`${modelId}:event:2026-08-09:01`],
+        confidence: 0.88,
+      }],
+    },
+  });
+  const answer = await grounded.ask("cecilia", "Why that beta boundary?", undefined, {
+    displayName: "Cecilia",
+  });
+  assert.equal(answer.status, "answered");
+  assert.equal(answer.refused, false);
+  assert.match(answer.answer, /field evidence/u);
+  assert.deepEqual(answer.evidenceRefs, ["cecilia:event:2026-08-09:01"]);
+  assert.ok(answer.results.every(({ modelId }) => modelId === "cecilia"));
+
+  const empty = createLocalProvider({
+    operations: {
+      ask: async () => {
+        throw new Error("owner ask unavailable");
+      },
+      search: async () => [],
+    },
+  });
+  const refusal = await empty.ask("cecilia", "Unsupported fact", undefined, {
+    displayName: "Cecilia",
+  });
+  assert.equal(refusal.status, "insufficient_evidence");
+  assert.equal(refusal.refused, true);
+  assert.deepEqual(refusal.evidenceRefs, []);
+  assert.match(refusal.answer, /不会根据空白猜测/u);
+});
+
+test("LocalPersomeProvider degrades a failed MCP search to model-bound Snapshot search", async () => {
+  const provider = createLocalProvider({
+    operations: {
+      search: async () => {
+        throw new Error("private MCP failure /Users/private/.persome/index.db");
+      },
+    },
+  });
+  const results = await provider.search("cecilia", "Personal Card");
+  assert.ok(results.length > 0);
+  assert.ok(results.every(({ modelId }) => modelId === "cecilia"));
+  assert.ok(results.every(({ method }) => method === "snapshot-keyword-search"));
+  assert.equal(JSON.stringify(results).includes("/Users/private"), false);
+});
+
 test("RemotePersonalModelProvider sends Bearer auth and binds every operation", async () => {
   const requests = [];
   const provider = createRemoteProvider({
@@ -233,6 +341,8 @@ test("RemotePersonalModelProvider sends Bearer auth and binds every operation", 
       ({ authorization }) => authorization === "Bearer test-token",
     ),
   );
+  const remoteSearch = requests.find(({ path }) => path.endsWith("/search"));
+  assert.deepEqual(JSON.parse(remoteSearch.body), { query: "night" });
 });
 
 test("RemotePersonalModelProvider supports caller abort and timeout", async () => {

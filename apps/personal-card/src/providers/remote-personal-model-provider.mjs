@@ -8,6 +8,11 @@ import {
   assertSafeModelId,
 } from "../contracts/personal-model-provider.mjs";
 import { freezeCopy } from "./snapshot-backed-provider.mjs";
+import {
+  normalizeSearchOptions,
+  normalizeSearchResults,
+  publicSearchResult,
+} from "../content/personal-model-content-backend.mjs";
 
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
@@ -335,14 +340,23 @@ export class RemotePersonalModelProvider extends PersonalModelProvider {
         { status: 400 },
       );
     }
-    return assertBoundArray(
+    const searchOptions = normalizeSearchOptions(options);
+    const response = assertBoundArray(
       await this.request(`models/${encodeURIComponent(modelId)}/search`, {
         method: "POST",
+        // Keep the established remote wire contract. The local compatibility
+        // layer applies top_k and metadata without requiring a remote rollout.
         body: { query },
         signal: options.signal,
       }),
       modelId,
     );
+    return freezeCopy(normalizeSearchResults({
+      modelId,
+      payload: response,
+      topK: searchOptions.topK,
+      method: "remote-provider-search",
+    }).map(publicSearchResult));
   }
 
   async getEvidence(modelId, reference, grant, options = {}) {

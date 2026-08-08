@@ -18,6 +18,11 @@ import { ConnectorEventStore } from "./src/connectors/connector-event-store.mjs"
 import { ConnectorSessionService } from "./src/connectors/connector-session-service.mjs";
 import { ReportService } from "./src/connectors/report-service.mjs";
 import { EvidenceService } from "./src/evidence/evidence-service.mjs";
+import {
+  buildGroundedAnswer,
+  LocalPersomeContentBackend,
+  normalizeSearchOptions,
+} from "./src/content/personal-model-content-backend.mjs";
 import { LocalPersomeProvider } from "./src/providers/local-persome-provider.mjs";
 import { ProviderRegistry } from "./src/providers/provider-registry.mjs";
 import { OWNER_SCOPES } from "./src/auth/scope-policy.mjs";
@@ -190,11 +195,25 @@ function managedRuntimeIdentityReady(cliPath) {
 }
 
 function ownerProviderFor(profile) {
+  const contentBackend = new LocalPersomeContentBackend({
+    connectPersome,
+    ownerAskUrl: WHO_AM_I_URL,
+  });
   return new LocalPersomeProvider({
     modelIds: [profile.modelId],
     loadSnapshot: () => loadLocalOwnerSnapshot(profile),
     operations: {
-      correct: async ({ correction }) => writeLocalCorrection(correction),
+      search: ({ modelId, query, options }) =>
+        contentBackend.search({ modelId, query, options }),
+      ask: ({ modelId, question, displayName, options }) =>
+        contentBackend.ask({ modelId, question, displayName, options }),
+      getEvidence: ({ modelId, reference }) =>
+        contentBackend.getEvidence({ modelId, reference }),
+      correct: async ({ modelId, correction }) => {
+        const result = await writeLocalCorrection(correction);
+        contentBackend.invalidate(modelId);
+        return result;
+      },
     },
   });
 }
@@ -1401,24 +1420,6 @@ function buildLivePayload(activity, current) {
   };
 }
 
-function compactOwnerAnswer(value) {
-  const lines = String(value || "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const short = lines.find((line) => line.startsWith("我的短回答："));
-  const patternIndex = lines.findIndex((line) => line === "我用到的模式：");
-  const memoryIndex = lines.findIndex((line) => line === "相关记忆：");
-  const pattern = patternIndex >= 0 ? lines.slice(patternIndex + 1).find((line) => line.startsWith("- ")) : "";
-  const memory = memoryIndex >= 0 ? lines.slice(memoryIndex + 1).find((line) => line.startsWith("- ")) : "";
-  const pieces = [
-    short || lines.find((line) => !line.startsWith("你问的是：")) || "",
-    memory ? `相关记忆：${cleanModelText(memory.replace(/^-\s*/, ""), 260)}` : "",
-    !memory && pattern ? `模型依据：${cleanModelText(pattern.replace(/^-\s*/, ""), 220)}` : "",
-  ].filter(Boolean);
-  return pieces.join("\n\n") || "Persome 已连接，但这次没有找到足够清晰的依据。";
-}
-
 function allowedRequest(req) {
   const origin = String(req.headers.origin || "");
   return !origin || origin === `http://${CARD_HOST}:${CARD_PORT}` || origin === `http://localhost:${CARD_PORT}`;
@@ -1726,17 +1727,34 @@ async function searchActiveModel(req, res, url) {
   const body = await readJsonBody(req);
   const context = modelContext(req, res, url, body, "model:search");
   const query = String(body.query || "").trim().slice(0, 1200);
+  const searchOptions = normalizeSearchOptions(body);
   const provider = providerRegistry.resolve(context.modelId);
   const results = await provider.search(
     context.modelId,
     query,
     context.grant,
+    searchOptions,
   );
+  const sourceRefs = [...new Set(
+    results.flatMap((result) => result.sourceRefs || result.evidenceRefs || []),
+  )];
   sendJson(res, 200, {
     ok: true,
     modelId: context.modelId,
     revision: context.revision,
+    status: results.length ? "results" : "no_results",
     results,
+    contentType: "observed",
+    confidence: results.length
+      ? Math.max(...results.map((result) => Number(result.confidence) || 0))
+      : 0,
+    timeRange: {
+      since: searchOptions.since || null,
+      until: searchOptions.until || null,
+    },
+    generatedAt: new Date().toISOString(),
+    method: results[0]?.method || "provider-search",
+    sourceRefs,
   });
 }
 
@@ -1753,26 +1771,45 @@ async function askActiveModel(req, res, url) {
     return;
   }
   const startedAt = Date.now();
+  const searchOptions = normalizeSearchOptions({
+    ...body,
+    top_k: body.top_k ?? body.topK ?? 5,
+  });
   const provider = providerRegistry.resolve(context.modelId);
-  const results = await provider.search(
-    context.modelId,
-    question,
-    context.grant,
-  );
-  const evidence = results.slice(0, 2).map((result) =>
-    cleanModelText(result.text || result.title, 240)
-  ).filter(Boolean);
-  const answer = evidence.length
-    ? `Personal Model 找到的直接依据：${evidence.join("；另一条相关内容是：")}`
-    : `${context.snapshot.model.displayName} 的 Personal Model 暂时没有找到足够清晰的依据。`;
+  let answer;
+  if (typeof provider.ask === "function") {
+    answer = await provider.ask(
+      context.modelId,
+      question,
+      context.grant,
+      {
+        ...searchOptions,
+        displayName: context.snapshot.model.displayName,
+      },
+    );
+  } else {
+    let results = [];
+    try {
+      results = await provider.search(
+        context.modelId,
+        question,
+        context.grant,
+        searchOptions,
+      );
+    } catch {
+      // A search failure becomes a safe refusal instead of a fabricated answer.
+    }
+    answer = buildGroundedAnswer({
+      modelId: context.modelId,
+      displayName: context.snapshot.model.displayName,
+      results,
+    });
+  }
   sendJson(res, 200, {
     ok: true,
-    modelId: context.modelId,
+    ...answer,
     revision: context.revision,
-    answer,
-    results,
     latencyMs: Date.now() - startedAt,
-    tools: ["search"],
   });
 }
 
@@ -2220,61 +2257,6 @@ async function writeLocalCorrection(correction) {
     return parseToolJson(result);
   } finally {
     client.close();
-  }
-}
-
-async function askPersome(req, res) {
-  const body = await readJsonBody(req);
-  const question = String(body.question || "").trim().slice(0, 1200);
-  const startedAt = Date.now();
-  if (!question) {
-    sendJson(res, 400, { ok: false, error: "请输入问题" });
-    return;
-  }
-
-  try {
-    const response = await fetch(`${WHO_AM_I_URL}/api/owner/ask`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question }),
-      signal: AbortSignal.timeout(18000),
-    });
-    const data = await response.json();
-    if (!response.ok || data.ok === false) throw new Error(data.error || "本机问答服务暂时不可用");
-    sendJson(res, 200, { ...data, answer: compactOwnerAnswer(data.answer) });
-    return;
-  } catch {
-    const client = await connectPersome();
-    try {
-      const searchResult = await client.callTool("search", {
-        query: question,
-        top_k: 3,
-        breadth: 0.25,
-        include_bodies: true,
-      });
-      const search = parseToolJson(searchResult);
-      const hits = (Array.isArray(search.hits) ? search.hits : search.results || []).slice(0, 3);
-      const seen = new Set();
-      const evidence = [];
-      for (const hit of hits) {
-        const text = cleanModelText(hit.content || hit.text || hit.summary, 210);
-        const key = text.toLowerCase().replace(/\W/g, "").slice(0, 90);
-        if (!text || seen.has(key)) continue;
-        seen.add(key);
-        evidence.push(text);
-        if (evidence.length >= 2) break;
-      }
-      sendJson(res, 200, {
-        ok: true,
-        answer: evidence.length
-          ? `Persome 找到的直接依据：${evidence.join("；另一条相关记忆是：")}`
-          : "Persome 已连接，但这次没有找到足够清晰的依据。",
-        latencyMs: Date.now() - startedAt,
-        tools: ["search"],
-      });
-    } finally {
-      client.close();
-    }
   }
 }
 
