@@ -13,6 +13,7 @@ import {
   parsePersonalModelCardSnapshot,
 } from "../../src/contracts/personal-model-card.mjs";
 import { FixtureProvider } from "../../src/providers/fixture-provider.mjs";
+import { LocalPersomeProvider } from "../../src/providers/local-persome-provider.mjs";
 import { ProviderRegistry } from "../../src/providers/provider-registry.mjs";
 
 const NOW = Date.parse("2026-08-07T08:00:00.000Z");
@@ -467,4 +468,65 @@ test("concurrent switches cannot let a stale Provider response overwrite a newer
   assert.equal(finalState.activeModelId, "lin-demo");
   assert.equal(finalState.revision, fast.revision);
   assert.equal(finalState.snapshot.model.handle, "@lin");
+});
+
+test("verified correction refresh propagates into the viewer session atomically", async () => {
+  const store = createStore();
+  const session = store.createSession({ viewerUserId: "owner_cecilia" });
+  let rawSnapshot = structuredClone(await fixture("cecilia"));
+  const previousConclusion = rawSnapshot.personalModel.faces[0].text;
+  const replacement = "只在来源可追溯并且用户授权后公开分发。";
+  const provider = new LocalPersomeProvider({
+    modelIds: ["cecilia"],
+    loadSnapshot: async () => rawSnapshot,
+    operations: {
+      correct: async () => {
+        rawSnapshot = structuredClone(rawSnapshot);
+        rawSnapshot.personalModel.faces[0].text = replacement;
+        rawSnapshot.personalModel.updatedAt = "2026-08-07T08:10:00.000Z";
+        return {
+          receipt: "correction-session-001",
+          affected: [
+            {
+              reference: "cecilia:face:01",
+              previousConclusion,
+              replacement,
+            },
+          ],
+        };
+      },
+    },
+  });
+  const service = createService({
+    sessionStore: store,
+    providerRegistry: new ProviderRegistry({ cecilia: provider }),
+    isOwner: ({ session: viewer, modelId }) =>
+      viewer.viewerUserId === "owner_cecilia" && modelId === "cecilia",
+  });
+
+  const initial = await service.switchModel({
+    sessionId: session.id,
+    modelId: "cecilia",
+  });
+  const correction = await provider.correct(
+    "cecilia",
+    "Replace the old conclusion.",
+  );
+  assert.equal(correction.status, "applied");
+  assert.equal(
+    store.getSession(session.id).snapshot.personalModel.faces[0].text,
+    previousConclusion,
+  );
+
+  const refreshed = await service.refreshModel({
+    sessionId: session.id,
+    expectedRevision: initial.revision,
+  });
+  assert.equal(refreshed.revision, initial.revision + 1);
+  assert.equal(refreshed.activeModelId, "cecilia");
+  assert.equal(refreshed.snapshot.personalModel.faces[0].text, replacement);
+  assert.equal(
+    JSON.stringify(refreshed.snapshot).includes(previousConclusion),
+    false,
+  );
 });

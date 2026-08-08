@@ -179,6 +179,13 @@ test("local content backend provides semantic search, grounded ask, refusal, fal
   assert.equal(evidence.status, 200);
   assert.equal(evidence.body.evidence.modelId, modelId);
   assert.equal(evidence.body.evidence.reference, reference);
+  assert.equal(evidence.body.evidence.source.type, "persome-memory");
+  assert.equal(
+    evidence.body.evidence.source.originalTime,
+    "2026-08-08T10:30:00.000Z",
+  );
+  assert.equal(evidence.body.evidence.supports[0].relationship, "direct");
+  assert.equal(evidence.body.evidence.availability.status, "available");
   assert.equal(evidence.body.evidence.content.text, firstMemory);
   assert.equal(evidence.body.evidence.content.resolved.status, "available");
 
@@ -227,6 +234,13 @@ test("local content backend provides semantic search, grounded ask, refusal, fal
     correction: "The latest corrected beta memory.",
   });
   assert.equal(correction.status, 200);
+  assert.equal(correction.body.status, "applied");
+  assert.equal(correction.body.receiptSource, "product");
+  assert.equal(correction.body.verification.status, "verified");
+  assert.equal(
+    correction.body.verification.oldConclusionDeprioritized,
+    true,
+  );
   const freshSearch = await post("/api/model/search", {
     query: "latest corrected beta",
   });

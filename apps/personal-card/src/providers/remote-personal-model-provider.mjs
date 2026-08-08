@@ -1,5 +1,6 @@
 import {
   parsePersonalModelCardSnapshot,
+  parsePersonalModelCorrectionResponse,
   parsePersonalModelEvidenceResponse,
 } from "../contracts/personal-model-card.mjs";
 import {
@@ -392,19 +393,44 @@ export class RemotePersonalModelProvider extends PersonalModelProvider {
         { status: 502 },
       );
     }
+    if (evidence.reference !== reference) {
+      throw new PersonalModelProviderError(
+        "EVIDENCE_RESPONSE_MISMATCH",
+        "The remote Personal Model service returned different Evidence.",
+        { status: 502 },
+      );
+    }
     return evidence;
   }
 
   async correct(modelId, correction, grant, options = {}) {
     assertSafeModelId(modelId);
-    return assertBoundObject(
-      await this.request(`models/${encodeURIComponent(modelId)}/corrections`, {
+    const rawCorrection = await this.request(
+      `models/${encodeURIComponent(modelId)}/corrections`,
+      {
         method: "POST",
         body: { correction },
         signal: options.signal,
-      }),
-      modelId,
+      },
     );
+    let response;
+    try {
+      response = parsePersonalModelCorrectionResponse(rawCorrection);
+    } catch {
+      throw new PersonalModelProviderError(
+        "INVALID_PROVIDER_RESPONSE",
+        "The remote Personal Model service returned an invalid correction receipt.",
+        { status: 502 },
+      );
+    }
+    if (response.modelId !== modelId) {
+      throw new PersonalModelProviderError(
+        "MODEL_ID_MISMATCH",
+        "The remote Personal Model service returned a different model.",
+        { status: 502 },
+      );
+    }
+    return response;
   }
 
   async connectAgent(modelId, connectorId, grant, options = {}) {
