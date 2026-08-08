@@ -80,7 +80,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(isBootstrapInstaller ? .regular : .accessory)
+        NSApp.setActivationPolicy(
+            isBootstrapInstaller || whoAmIVisualQAOpaque ? .regular : .accessory
+        )
         createMainMenu()
         createWindow(bootstrap: isBootstrapInstaller)
         if !isBootstrapInstaller {
@@ -213,16 +215,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             spotlightPanel.isFloatingPanel = true
             spotlightPanel.level = .floating
-            spotlightPanel.hidesOnDeactivate = true
+            spotlightPanel.hidesOnDeactivate = !whoAmIVisualQAOpaque
             spotlightPanel.collectionBehavior = [
                 .canJoinAllSpaces,
                 .fullScreenAuxiliary,
                 .transient,
             ]
-            spotlightPanel.isOpaque = false
-            spotlightPanel.backgroundColor = .clear
+            spotlightPanel.isOpaque = whoAmIVisualQAOpaque
+            spotlightPanel.backgroundColor = whoAmIVisualQAOpaque
+                ? NSColor.windowBackgroundColor
+                : .clear
             spotlightPanel.hasShadow = false
-            spotlightPanel.isMovableByWindowBackground = true
+            spotlightPanel.isMovableByWindowBackground = false
             spotlightPanel.animationBehavior = .utilityWindow
             spotlightPanel.isExcludedFromWindowsMenu = true
             window = spotlightPanel
@@ -798,7 +802,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             host.wantsLayer = true
             host.layer?.backgroundColor = NSColor.clear.cgColor
             window.contentView = host
-            window.backgroundColor = .clear
+            window.backgroundColor = whoAmIVisualQAOpaque
+                ? NSColor.windowBackgroundColor
+                : .clear
             self.statusMenuModelItem?.title = "Personal Model · 已连接"
             self.showMainWindow(nil)
         }

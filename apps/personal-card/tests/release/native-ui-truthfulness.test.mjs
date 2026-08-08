@@ -44,7 +44,9 @@ test("native beta language separates records, inference, generated text, and sug
   assert.match(source, /置信度/);
   assert.match(source, /hasReliableSuggestionSource/);
   assert.match(source, /!item\.isFutureLike \|\| item\.hasReliableSuggestionSource/);
-  assert.match(source, /item\.isFutureLike \? "SUGGEST"/);
+  assert.match(source, /case "未来": return "○"/);
+  assert.match(source, /item\.truthMetadata\.kind\.label/);
+  assert.match(source, /\.accessibilityHint\(/);
   assert.match(source, /if !item\.isFutureLike, let when/);
 });
 
