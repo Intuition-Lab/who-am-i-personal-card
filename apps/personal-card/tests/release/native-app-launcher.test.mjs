@@ -44,6 +44,7 @@ test("production installs a native SwiftUI app with an embedded backend", async 
   assert.match(swiftSource, /NSStatusBar\.system\.statusItem/);
   assert.match(swiftSource, /positionSpotlightPanel/);
   assert.match(swiftSource, /statusButton\.convert/);
+  assert.match(swiftSource, /isMovableByWindowBackground = false/);
   assert.match(swiftSource, /showSearchFromStatusItem/);
   assert.match(swiftSource, /showAskFromStatusItem/);
   assert.match(swiftSource, /showMemorySkyFromStatusItem/);
@@ -56,6 +57,24 @@ test("production installs a native SwiftUI app with an embedded backend", async 
   assert.match(buildScript, /WhoAmIManagedInstall/);
   assert.match(buildScript, /--bootstrap/);
   assert.match(buildScript, /WhoAmIBootstrapInstall/);
+  assert.match(buildScript, /APP_ICON_SOURCE_DIRECTORY/);
+  assert.match(buildScript, /Contents.*Resources/s);
+  assert.match(buildScript, /APP_ICON_RESOURCES_DIRECTORY/);
+  for (const icon of [
+    "chatgpt.png",
+    "chrome.png",
+    "claude.png",
+    "coast.png",
+    "finder.png",
+    "lark.png",
+    "notes.png",
+    "terminal.png",
+    "wechat.png",
+  ]) {
+    assert.match(buildScript, new RegExp(icon.replace(".", "\\.")));
+  }
+  assert.match(nativeUI, /Bundle\.main\.resourceURL/);
+  assert.match(nativeUI, /appendingPathComponent\("AppIcons"/);
   assert.match(swiftSource, /installAndOpenNativeApp/);
   assert.match(swiftSource, /Install Who Am I\.command/);
   assert.match(swiftSource, /Applications.*Who Am I\.app/s);
@@ -115,4 +134,10 @@ test("native app preserves the original V5 interaction surfaces without a WebVie
     assert.match(nativeUI, new RegExp(detail));
   }
   assert.doesNotMatch(nativeUI, /WKWebView|WebKit/);
+  assert.match(nativeUI, /frame\(width: 430, height: 430 \/ 1\.586\)/);
+  assert.match(nativeUI, /\(28, 40, 16, 34\)/);
+  assert.match(nativeUI, /\(66, 56, 14, 26\)/);
+  assert.match(nativeUI, /\(46, 72, 11, 18\)/);
+  assert.match(nativeUI, /\(76, 26, 9, 12\)/);
+  assert.doesNotMatch(nativeUI, /COPY CARD/);
 });

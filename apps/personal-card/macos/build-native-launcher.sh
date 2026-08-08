@@ -8,6 +8,7 @@ unset CDPATH
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_PATH="${SCRIPT_DIR}/WhoAmIApp.swift"
 NATIVE_UI_SOURCE_PATH="${SCRIPT_DIR}/WhoAmINativeUI.swift"
+APP_ICON_SOURCE_DIRECTORY="${SCRIPT_DIR}/../assets/app-icons"
 PRODUCT_ROOT=""
 PERSOME_ROOT=""
 PRODUCT_VERSION=""
@@ -131,6 +132,31 @@ for source_file in "${SOURCE_PATH}" "${NATIVE_UI_SOURCE_PATH}"; do
   fi
 done
 
+APP_ICON_FILES=(
+  chatgpt.png
+  chrome.png
+  claude.png
+  coast.png
+  finder.png
+  lark.png
+  notes.png
+  terminal.png
+  wechat.png
+)
+if [[ ! -d "${APP_ICON_SOURCE_DIRECTORY}" || -L "${APP_ICON_SOURCE_DIRECTORY}" ]]; then
+  /usr/bin/printf 'Native activity icon directory is missing or unsafe: %s\n' \
+    "${APP_ICON_SOURCE_DIRECTORY}" >&2
+  exit 1
+fi
+for icon_file in "${APP_ICON_FILES[@]}"; do
+  icon_path="${APP_ICON_SOURCE_DIRECTORY}/${icon_file}"
+  if [[ ! -f "${icon_path}" || -L "${icon_path}" ]]; then
+    /usr/bin/printf 'Native activity icon is missing or unsafe: %s\n' \
+      "${icon_path}" >&2
+    exit 1
+  fi
+done
+
 /bin/mkdir -p "${OUTPUT_DIRECTORY}"
 OUTPUT_DIRECTORY="$(cd "${OUTPUT_DIRECTORY}" && pwd -P)"
 APP_PATH="${OUTPUT_DIRECTORY}/Who Am I.app"
@@ -168,7 +194,16 @@ SWIFTC="$(/usr/bin/xcrun --sdk macosx --find swiftc)"
 STAGING_APP="${TEMPORARY_ROOT}/Who Am I.app"
 CONTENTS="${STAGING_APP}/Contents"
 MACOS_DIRECTORY="${CONTENTS}/MacOS"
-/bin/mkdir -p "${MACOS_DIRECTORY}"
+RESOURCES_DIRECTORY="${CONTENTS}/Resources"
+APP_ICON_RESOURCES_DIRECTORY="${RESOURCES_DIRECTORY}/AppIcons"
+/bin/mkdir -p "${MACOS_DIRECTORY}" "${APP_ICON_RESOURCES_DIRECTORY}"
+
+for icon_file in "${APP_ICON_FILES[@]}"; do
+  /bin/cp "${APP_ICON_SOURCE_DIRECTORY}/${icon_file}" \
+    "${APP_ICON_RESOURCES_DIRECTORY}/${icon_file}"
+  /bin/chmod 0644 "${APP_ICON_RESOURCES_DIRECTORY}/${icon_file}"
+done
+/bin/chmod 0755 "${RESOURCES_DIRECTORY}" "${APP_ICON_RESOURCES_DIRECTORY}"
 
 for architecture in arm64 x86_64; do
   "${SWIFTC}" \
