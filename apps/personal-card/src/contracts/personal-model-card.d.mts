@@ -11,6 +11,22 @@ export type ReportSectionKind =
   | "understanding"
   | "evidence"
   | "note";
+export type PersonalModelContentProvenance =
+  | "observed"
+  | "inferred"
+  | "generated";
+
+export interface PersonalModelContentMetadata {
+  readonly provenance?: PersonalModelContentProvenance;
+  readonly sourceRefs?: readonly string[];
+  readonly confidence?: number;
+  readonly timeRange?: {
+    readonly start: string;
+    readonly end: string;
+  };
+  readonly generatedAt?: string;
+  readonly method?: string;
+}
 
 export interface PersonalModelDescriptor {
   readonly id: string;
@@ -35,6 +51,7 @@ export interface PersonalModelCard {
   readonly tagline: string;
   readonly publicUrl: string;
   readonly material?: string;
+  readonly metadata?: PersonalModelContentMetadata;
   readonly glyph: readonly boolean[];
 }
 
@@ -44,6 +61,7 @@ export interface PersonalModelFace {
   readonly observations: number;
   readonly confidence: number;
   readonly evidenceRefs?: readonly string[];
+  readonly metadata?: PersonalModelContentMetadata;
 }
 
 export interface PersonalModelSummary {
@@ -51,6 +69,7 @@ export interface PersonalModelSummary {
   readonly root: string;
   readonly faces: readonly PersonalModelFace[];
   readonly updatedAt: string;
+  readonly metadata?: PersonalModelContentMetadata;
 }
 
 export interface PersonalModelNowItem {
@@ -60,6 +79,7 @@ export interface PersonalModelNowItem {
   readonly why: string;
   readonly when: string;
   readonly dayId?: string;
+  readonly metadata?: PersonalModelContentMetadata;
 }
 
 export interface PersonalModelNow {
@@ -73,6 +93,7 @@ export interface PersonalModelTimeEvent {
   readonly detail: string;
   readonly app?: string;
   readonly evidenceRef?: string;
+  readonly metadata?: PersonalModelContentMetadata;
 }
 
 export interface PersonalModelDay {
@@ -81,6 +102,7 @@ export interface PersonalModelDay {
   readonly portrait: string;
   readonly letter?: string;
   readonly events: readonly PersonalModelTimeEvent[];
+  readonly metadata?: PersonalModelContentMetadata;
 }
 
 export interface PersonalModelTime {
@@ -91,6 +113,7 @@ export interface PersonalModelIdentity {
   readonly description: string;
   readonly dailyLine: string;
   readonly weeklyLetter: readonly string[];
+  readonly metadata?: PersonalModelContentMetadata;
 }
 
 export interface PersonalModelConnector {
@@ -106,6 +129,7 @@ export interface PersonalModelReportSection {
   readonly kind: ReportSectionKind;
   readonly title: string;
   readonly body: string;
+  readonly metadata?: PersonalModelContentMetadata;
 }
 
 export interface PersonalModelReport {
@@ -119,6 +143,7 @@ export interface PersonalModelReport {
   readonly evidenceCount: number;
   readonly sections: readonly PersonalModelReportSection[];
   readonly evidenceRefs: readonly string[];
+  readonly metadata?: PersonalModelContentMetadata;
 }
 
 /**
@@ -177,9 +202,49 @@ export interface PersonalModelGrantClaims {
 export interface PersonalModelEvidenceResponse {
   readonly modelId: string;
   readonly reference: string;
+  readonly source: {
+    readonly type:
+      | "persome-memory"
+      | "persome-activity"
+      | "derived-summary"
+      | "agent-connector-receipt"
+      | "coast-frame";
+    readonly originalTime: string | null;
+    readonly application: string | null;
+    readonly title: string | null;
+    readonly recordId?: string;
+  };
+  readonly supports: readonly {
+    readonly claim: string;
+    readonly relationship: "direct" | "indirect";
+  }[];
+  readonly availability: {
+    readonly status: "available" | "unavailable";
+    readonly reason?: string;
+  };
   readonly content: unknown;
   readonly receipt?: string;
   readonly capturedAt?: string;
+}
+
+export interface PersonalModelCorrectionResponse {
+  readonly modelId: string;
+  readonly status: "accepted" | "applied";
+  readonly receipt: string | null;
+  readonly receiptSource?: "runtime" | "product" | "remote";
+  readonly affected: readonly {
+    readonly reference?: string;
+    readonly previousConclusion: string;
+    readonly replacement?: string;
+    readonly state: "deprioritized" | "pending";
+  }[];
+  readonly verification: {
+    readonly status: "unverified" | "verified";
+    readonly refreshed: boolean;
+    readonly oldConclusionDeprioritized: boolean;
+    readonly previousUpdatedAt?: string | null;
+    readonly updatedAt?: string | null;
+  };
 }
 
 export interface PersonalModelCardValidationIssue {
@@ -225,6 +290,11 @@ export function parsePersonalModelEvidenceResponse(
   input: unknown,
 ): PersonalModelEvidenceResponse;
 
+export function parsePersonalModelCorrectionResponse(
+  input: unknown,
+): PersonalModelCorrectionResponse;
+
 export const PERSONAL_MODEL_CARD_SCHEMA_ID: string;
 export const PERSONAL_MODEL_GRANT_SCHEMA_ID: string;
 export const PERSONAL_MODEL_EVIDENCE_SCHEMA_ID: string;
+export const PERSONAL_MODEL_CORRECTION_SCHEMA_ID: string;

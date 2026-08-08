@@ -41,6 +41,32 @@ function optionalString(value, field) {
   return value;
 }
 
+function optionalStringArray(value, field) {
+  if (value === undefined || value === null) return Object.freeze([]);
+  if (
+    !Array.isArray(value) ||
+    value.length > 8 ||
+    value.some((item) => typeof item !== "string")
+  ) {
+    throw new ConnectorIsolationError(
+      "INVALID_CONNECTOR_EVENT",
+      `Connector event ${field} must be an array of strings.`,
+    );
+  }
+  return Object.freeze([...value]);
+}
+
+function eventStatus(value) {
+  if (value === undefined || value === null) return "ok";
+  if (!new Set(["ok", "error"]).has(value)) {
+    throw new ConnectorIsolationError(
+      "INVALID_CONNECTOR_EVENT",
+      "Connector event status must be ok or error.",
+    );
+  }
+  return value;
+}
+
 function eventHashInput(record) {
   return {
     modelId: record.modelId,
@@ -54,6 +80,9 @@ function eventHashInput(record) {
     summary: record.summary,
     occurredAt: record.occurredAt,
     durationMs: record.durationMs,
+    details: record.details,
+    interpretation: record.interpretation,
+    status: record.status,
   };
 }
 
@@ -128,6 +157,9 @@ function createEventRecord(session, event, clock) {
     summary: optionalString(event.summary, "summary"),
     occurredAt: new Date(occurredAt).toISOString(),
     durationMs,
+    details: optionalStringArray(event.details, "details"),
+    interpretation: optionalString(event.interpretation, "interpretation"),
+    status: eventStatus(event.status),
   };
   return Object.freeze({
     eventId: stableConnectorEventHash(core),
@@ -136,6 +168,12 @@ function createEventRecord(session, event, clock) {
 }
 
 function assertStoredEvent(record, expected) {
+  const details = optionalStringArray(record?.details, "details");
+  const interpretation = optionalString(
+    record?.interpretation,
+    "interpretation",
+  );
+  const status = eventStatus(record?.status);
   if (
     record === null ||
     typeof record !== "object" ||
@@ -153,7 +191,12 @@ function assertStoredEvent(record, expected) {
       { status: 500 },
     );
   }
-  return Object.freeze(record);
+  return Object.freeze({
+    ...record,
+    details,
+    interpretation,
+    status,
+  });
 }
 
 export class ConnectorEventStore {

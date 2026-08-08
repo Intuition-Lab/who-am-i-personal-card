@@ -44,6 +44,20 @@ function frozenClone(value) {
   return deepFreeze(structuredClone(value));
 }
 
+function stripMetadataSourceRefs(value) {
+  if (value === null || typeof value !== "object") return value;
+  if (
+    !Array.isArray(value) &&
+    value.metadata &&
+    typeof value.metadata === "object"
+  ) {
+    delete value.metadata.sourceRefs;
+    if (Object.keys(value.metadata).length === 0) delete value.metadata;
+  }
+  for (const child of Object.values(value)) stripMetadataSourceRefs(child);
+  return value;
+}
+
 export function normalizeScopes(scopes) {
   if (!Array.isArray(scopes)) {
     deny("INVALID_SCOPE_SET", "Personal Model scopes must be an array.");
@@ -175,7 +189,9 @@ function authorizedProjection(snapshot, authorization) {
     );
   }
 
-  return frozenClone(projected);
+  const detached = structuredClone(projected);
+  if (!canReadEvidence) stripMetadataSourceRefs(detached);
+  return deepFreeze(detached);
 }
 
 export function projectSnapshotByScope(snapshot, authorization) {
