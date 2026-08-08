@@ -292,6 +292,7 @@ bash scripts/validate-runtime-lock.sh
 | `scripts/smoke-install.sh` | Isolated real install/diagnose/uninstall gate |
 | `scripts/validate-runtime-lock.sh` | Supply-chain and package-contract check |
 | `docs/architecture.md` | Product/Runtime boundary and integration rules |
+| `docs/content-truth-spec.md` | Per-surface content provenance, honest empty states, quality matrix and implementation backlog |
 | `docs/diagnostics.md` | Safe diagnostic schema, states, and exit codes |
 | `docs/evidence/` | Reviewable upstream and release-qualification evidence |
 | `docs/github-repository-setup.md` | Safe new-repository and Release-control order |
