@@ -78,7 +78,36 @@ test("one viewer session switches Cecilia/Lin without six-module data crossover"
   });
   assert.equal(connected.status, 200);
   assert.equal(connected.body.modelId, "cecilia");
-  const oldConnectorSessionId = connected.body.connector.sessionId;
+  const disconnected = await request(
+    "/api/model/connectors/codex/disconnect",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    },
+  );
+  assert.equal(disconnected.status, 200);
+  assert.equal(disconnected.body.connector.status, "available");
+  assert.equal(
+    disconnected.body.connector.sessionId,
+    connected.body.connector.sessionId,
+  );
+  const disconnectedAuthorization = await request(
+    `/api/model/evidence?reference=cecilia:event:2026-08-07:01&connectorSessionId=${connected.body.connector.sessionId}`,
+  );
+  assert.equal(disconnectedAuthorization.status, 403);
+  assert.equal(
+    disconnectedAuthorization.body.code,
+    "CONNECTOR_SESSION_REVOKED",
+  );
+
+  const reconnected = await request("/api/model/connectors/codex/connect", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  assert.equal(reconnected.status, 200);
+  const oldConnectorSessionId = reconnected.body.connector.sessionId;
 
   const lin = await switchTo("lin-demo", "authorized");
   assert.equal(lin.status, 200);

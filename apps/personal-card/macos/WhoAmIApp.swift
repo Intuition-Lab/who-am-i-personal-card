@@ -80,8 +80,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(isBootstrapInstaller ? .regular : .accessory)
         createMainMenu()
-        createWindow(bootstrap: isBootstrapInstaller)
         createStatusItem()
+        createWindow(bootstrap: isBootstrapInstaller)
         NSApp.activate(ignoringOtherApps: true)
 
         Task { [weak self] in
@@ -209,6 +209,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             spotlightPanel.backgroundColor = .clear
             spotlightPanel.hasShadow = false
             spotlightPanel.isMovableByWindowBackground = true
+            spotlightPanel.animationBehavior = .utilityWindow
+            spotlightPanel.isExcludedFromWindowsMenu = true
             window = spotlightPanel
         }
         window.title = "Who Am I"
@@ -217,7 +219,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             : NSSize(width: 760, height: 560)
         window.isReleasedWhenClosed = false
         window.contentView = bootstrap ? makeBootstrapView() : makeLoadingView()
-        window.center()
+        if bootstrap {
+            window.center()
+        } else {
+            positionSpotlightPanel(window)
+        }
         window.makeKeyAndOrderFront(nil)
 
         self.window = window
@@ -226,6 +232,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
                 [weak self] event in
                 if event.keyCode == 53 {
+                    if self?.appState?.handleEscape() == true {
+                        return nil
+                    }
                     self?.window?.orderOut(nil)
                     return nil
                 }
@@ -238,7 +247,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         guard let button = item.button else { return }
         let image = NSImage(
-            systemSymbolName: "person.crop.circle.fill",
+            systemSymbolName: "asterisk",
             accessibilityDescription: "Who Am I"
         )
         image?.isTemplate = true
@@ -258,16 +267,54 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(openItem)
         menu.addItem(.separator())
 
-        for (index, section) in WhoAmISection.allCases.enumerated() {
+        let searchItem = NSMenuItem(
+            title: "搜索记忆",
+            action: #selector(showSearchFromStatusItem(_:)),
+            keyEquivalent: "k"
+        )
+        searchItem.keyEquivalentModifierMask = [.command]
+        searchItem.target = self
+        menu.addItem(searchItem)
+        let askItem = NSMenuItem(
+            title: "问这张卡",
+            action: #selector(showAskFromStatusItem(_:)),
+            keyEquivalent: ""
+        )
+        askItem.target = self
+        menu.addItem(askItem)
+        menu.addItem(.separator())
+
+        let nativeSections: [(WhoAmISection, String)] = [
+            (.rewind, "回到某一天"),
+            (.connectors, "继续工作"),
+            (.identity, "Identity"),
+            (.reports, "Reports"),
+            (.evidence, "Evidence"),
+        ]
+        for (section, title) in nativeSections {
             let sectionItem = NSMenuItem(
-                title: section.rawValue,
+                title: title,
                 action: #selector(showSectionFromStatusItem(_:)),
                 keyEquivalent: ""
             )
             sectionItem.target = self
-            sectionItem.tag = index
+            sectionItem.tag = WhoAmISection.allCases.firstIndex(of: section) ?? 0
             menu.addItem(sectionItem)
         }
+        let skyItem = NSMenuItem(
+            title: "巡星 · Memory Sky",
+            action: #selector(showMemorySkyFromStatusItem(_:)),
+            keyEquivalent: ""
+        )
+        skyItem.target = self
+        menu.addItem(skyItem)
+        let shareItem = NSMenuItem(
+            title: "分享这张卡",
+            action: #selector(showShareFromStatusItem(_:)),
+            keyEquivalent: ""
+        )
+        shareItem.target = self
+        menu.addItem(shareItem)
         menu.addItem(.separator())
         let modelItem = NSMenuItem(title: "Personal Model · 正在连接", action: nil, keyEquivalent: "")
         modelItem.isEnabled = false
@@ -307,14 +354,61 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showMainWindow(_ sender: Any?) {
         guard let window else { return }
-        window.center()
+        if !isBootstrapInstaller {
+            positionSpotlightPanel(window)
+        }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func positionSpotlightPanel(_ window: NSWindow) {
+        let statusButton = statusItem?.button
+        let statusScreen = statusButton?.window?.screen
+        let screen = statusScreen ?? NSScreen.main ?? NSScreen.screens.first
+        guard let screen else { return }
+
+        let visibleFrame = screen.visibleFrame
+        let horizontalMargin: CGFloat = 12
+        let verticalMargin: CGFloat = 10
+        var originX = visibleFrame.maxX - window.frame.width - horizontalMargin
+
+        if let statusButton, let statusWindow = statusButton.window {
+            let buttonRect = statusButton.convert(statusButton.bounds, to: nil)
+            let screenRect = statusWindow.convertToScreen(buttonRect)
+            originX = screenRect.maxX - window.frame.width + 8
+        }
+
+        originX = min(
+            max(originX, visibleFrame.minX + horizontalMargin),
+            visibleFrame.maxX - window.frame.width - horizontalMargin
+        )
+        let originY = visibleFrame.maxY - window.frame.height - verticalMargin
+        window.setFrameOrigin(NSPoint(x: originX, y: originY))
     }
 
     @objc private func showSectionFromStatusItem(_ sender: NSMenuItem) {
         guard WhoAmISection.allCases.indices.contains(sender.tag) else { return }
         appState?.selectedSection = WhoAmISection.allCases[sender.tag]
+        showMainWindow(nil)
+    }
+
+    @objc private func showSearchFromStatusItem(_ sender: Any?) {
+        appState?.openSearch()
+        showMainWindow(nil)
+    }
+
+    @objc private func showAskFromStatusItem(_ sender: Any?) {
+        appState?.openAsk()
+        showMainWindow(nil)
+    }
+
+    @objc private func showMemorySkyFromStatusItem(_ sender: Any?) {
+        appState?.isMemorySkyOpen = true
+        showMainWindow(nil)
+    }
+
+    @objc private func showShareFromStatusItem(_ sender: Any?) {
+        appState?.openShare()
         showMainWindow(nil)
     }
 
@@ -325,7 +419,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private func makeLoadingView() -> NSView {
         let container = NSView()
         container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        container.layer?.backgroundColor = NSColor.clear.cgColor
+        let material = NSVisualEffectView()
+        material.material = .popover
+        material.blendingMode = .behindWindow
+        material.state = .active
+        material.wantsLayer = true
+        material.layer?.cornerRadius = 18
+        material.layer?.masksToBounds = true
+        material.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(material)
         let title = NSTextField(labelWithString: "正在连接你的 Personal Model")
         title.font = .systemFont(ofSize: 22, weight: .semibold)
         title.alignment = .center
@@ -339,10 +442,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         stack.alignment = .centerX
         stack.spacing = 18
         stack.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(stack)
+        material.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            material.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            material.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            material.widthAnchor.constraint(equalToConstant: 460),
+            material.heightAnchor.constraint(equalToConstant: 116),
+            stack.centerXAnchor.constraint(equalTo: material.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: material.centerYAnchor),
         ])
         return container
     }

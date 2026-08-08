@@ -178,4 +178,45 @@ export class SessionModelService {
       snapshot: projectedSnapshot,
     });
   }
+
+  async refreshModel({ sessionId, expectedRevision, signal }) {
+    const current = this.sessionStore.getSession(sessionId);
+    if (
+      !current.activeModelId ||
+      !current.authorization ||
+      !current.snapshot
+    ) {
+      throw new PersonalModelAuthorizationError(
+        "ACTIVE_MODEL_REQUIRED",
+        "The viewer session does not have an active Personal Model.",
+        { status: 409 },
+      );
+    }
+
+    const modelId = current.activeModelId;
+    const providerSnapshot = await this.providerRegistry.getSnapshot(
+      modelId,
+      current.grant,
+      { signal },
+    );
+    const snapshot = parsePersonalModelCardSnapshot(providerSnapshot);
+    if (snapshot.model.id !== modelId) {
+      throw new PersonalModelAuthorizationError(
+        "MODEL_RESPONSE_MISMATCH",
+        "The Provider returned a different Personal Model.",
+        { status: 502 },
+      );
+    }
+    const projectedSnapshot = projectSnapshotByScope(
+      snapshot,
+      current.authorization,
+    );
+    return this.sessionStore.commitModelSwitch(sessionId, {
+      expectedRevision,
+      activeModelId: modelId,
+      grant: current.grant,
+      authorization: projectedSnapshot.authorization,
+      snapshot: projectedSnapshot,
+    });
+  }
 }

@@ -282,23 +282,21 @@ if [[ -n "${RUNTIME_CHECKOUT}" ]]; then
   # reviewed build-time remote is still available.
   runtime_git -C "${RUNTIME_CHECKOUT}" archive --format=tar HEAD \
     | /usr/bin/shasum -a 256 >/dev/null
-  # Never copy or mutate a developer checkout. Export only the object graph
-  # reachable from the locked commit into a new independent repository. This
-  # excludes ignored/untracked files and cannot delete refs in the source.
+  # Never copy or mutate a developer checkout. Export the locked commit object
+  # and its complete tree into a new independent shallow repository. Excluding
+  # parent revisions is insufficient for a merge commit because Git may also
+  # exclude an unchanged root tree reachable through a parent.
   runtime_pack="${temporary_root}/pinned-runtime.pack"
   runtime_git init --quiet "${runtime_stage}"
-  runtime_parents="$(
-    runtime_git -C "${RUNTIME_CHECKOUT}" \
-      show -s --format='%P' "${RUNTIME_COMMIT}"
-  )"
   {
     printf '%s\n' "${RUNTIME_COMMIT}"
-    for runtime_parent in ${runtime_parents}; do
-      printf '^%s\n' "${runtime_parent}"
-    done
-  } | runtime_git -C "${RUNTIME_CHECKOUT}" \
-    pack-objects --stdout --revs \
-    > "${runtime_pack}"
+    runtime_git -C "${RUNTIME_CHECKOUT}" \
+      rev-list --objects "${RUNTIME_COMMIT}^{tree}" \
+      | /usr/bin/awk '{print $1}'
+  } | LC_ALL=C /usr/bin/sort -u \
+    | runtime_git -C "${RUNTIME_CHECKOUT}" \
+      pack-objects --stdout \
+      > "${runtime_pack}"
   runtime_git -C "${runtime_stage}" index-pack --stdin \
     < "${runtime_pack}" >/dev/null
   printf '%s\n' "${RUNTIME_COMMIT}" > "${runtime_stage}/.git/shallow"
