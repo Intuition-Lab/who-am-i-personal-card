@@ -7,9 +7,10 @@ remain release or rollout gates where stated.
 
 - The self-contained Release includes a `.dmg` and equivalent `.tar.gz`; both
   contain the pinned Personal Model source and never clone its separate
-  repository during installation. The installed `Who Am I.app` is ad-hoc
+  repository during installation. The DMG opens through a native
+  `Who Am I.app`, not an HTML file. The first-run and installed Apps are ad-hoc
   signed, not Developer ID signed or notarized, so macOS may require the tester
-  to confirm opening it.
+  to confirm opening them.
 - Distribution uses the public
   `Intuition-Lab/who-am-i-personal-card` repository. Tester access is staged by
   the beta runbook and remains blocked until the release and pilot gates pass.
@@ -60,9 +61,10 @@ remain release or rollout gates where stated.
 - The product name, existing V5 UI and owner-local first-run flow are
   implemented. The supported golden path is install → create local Card
   identity → complete Persome onboarding → reopen the same owner model.
-- The installed app now owns an AppKit window with an embedded WKWebView and
-  does not open the Card in the default browser. The approved V5 HTML remains
-  inside the private product directory as an internal rendering asset.
+- The installed App uses a native SwiftUI/AppKit interface and never loads a
+  WebView. Its first page is a transparent Spotlight-style panel over the real
+  desktop; the process remains available from the upper-right macOS menu bar.
+  Users launch `Who Am I.app`, including on first install.
 - One macOS account maps to one owner Runtime. Changing the Card display name
   does not create a second isolated memory store; use separate macOS accounts
   or explicitly separate `PERSOME_ROOT` values for different people.

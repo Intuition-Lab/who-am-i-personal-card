@@ -70,6 +70,11 @@ if [[ -e "${OUTPUT_DIRECTORY}" || -L "${OUTPUT_DIRECTORY}" ]]; then
   printf 'Output directory already exists: %s\n' "${OUTPUT_DIRECTORY}" >&2
   exit 2
 fi
+if [[ "$(/usr/bin/uname -s)" != "Darwin" ]]; then
+  printf '%s\n' \
+    'The distributable Who Am I.app must be built on macOS.' >&2
+  exit 1
+fi
 
 output_parent="${OUTPUT_DIRECTORY%/*}"
 if [[ "${output_parent}" == "${OUTPUT_DIRECTORY}" ]]; then
@@ -177,6 +182,16 @@ for package_file in \
 done
 
 if [[ -n "${RUNTIME_CHECKOUT}" ]]; then
+  if [[ ! -d "${RUNTIME_CHECKOUT}" || -L "${RUNTIME_CHECKOUT}" \
+    || ! -d "${RUNTIME_CHECKOUT}/.git" \
+    || -L "${RUNTIME_CHECKOUT}/.git" \
+    || -e "${RUNTIME_CHECKOUT}/.git/commondir" \
+    || -L "${RUNTIME_CHECKOUT}/.git/commondir" ]]; then
+    printf '%s\n' \
+      'Runtime checkout must be an independent repository with a real .git directory.' \
+      'Linked worktrees, submodules, symlinks, and shared Git directories are refused.' >&2
+    exit 1
+  fi
   runtime_checkout_verify "${RUNTIME_CHECKOUT}"
   if [[ -f "${RUNTIME_CHECKOUT}/.git/objects/info/alternates" \
     || -L "${RUNTIME_CHECKOUT}/.git/objects/info/alternates" ]]; then
@@ -188,7 +203,30 @@ if [[ -n "${RUNTIME_CHECKOUT}" ]]; then
   # reviewed build-time remote is still available.
   runtime_git -C "${RUNTIME_CHECKOUT}" archive --format=tar HEAD \
     | /usr/bin/shasum -a 256 >/dev/null
-  /bin/cp -R "${RUNTIME_CHECKOUT}" "${runtime_stage}"
+  # Never copy or mutate a developer checkout. Export only the object graph
+  # reachable from the locked commit into a new independent repository. This
+  # excludes ignored/untracked files and cannot delete refs in the source.
+  runtime_pack="${temporary_root}/pinned-runtime.pack"
+  runtime_git init --quiet "${runtime_stage}"
+  runtime_parents="$(
+    runtime_git -C "${RUNTIME_CHECKOUT}" \
+      show -s --format='%P' "${RUNTIME_COMMIT}"
+  )"
+  {
+    printf '%s\n' "${RUNTIME_COMMIT}"
+    for runtime_parent in ${runtime_parents}; do
+      printf '^%s\n' "${runtime_parent}"
+    done
+  } | runtime_git -C "${RUNTIME_CHECKOUT}" \
+    pack-objects --stdout --revs \
+    > "${runtime_pack}"
+  runtime_git -C "${runtime_stage}" index-pack --stdin \
+    < "${runtime_pack}" >/dev/null
+  printf '%s\n' "${RUNTIME_COMMIT}" > "${runtime_stage}/.git/shallow"
+  runtime_git -C "${runtime_stage}" \
+    -c advice.detachedHead=false \
+    checkout --quiet --detach "${RUNTIME_COMMIT}"
+  runtime_checkout_verify "${runtime_stage}"
 else
   runtime_checkout_create "${runtime_stage}"
   runtime_checkout_verify "${runtime_stage}"
@@ -214,6 +252,47 @@ if [[ -n "$(runtime_git -C "${runtime_stage}" remote)" \
   exit 1
 fi
 
+native_app_included=false
+embedded_product_root=""
+if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+  bootstrap_build_root="${temporary_root}/bootstrap-native-app"
+  /bin/bash \
+    "${stage_root}/apps/personal-card/macos/build-native-launcher.sh" \
+    --bootstrap \
+    --product-version "${version}" \
+    --output-directory "${bootstrap_build_root}"
+  if [[ ! -d "${bootstrap_build_root}/Who Am I.app" \
+    || ! -x "${bootstrap_build_root}/Who Am I.app/Contents/MacOS/WhoAmI" ]]; then
+    printf 'Native first-run App build is incomplete.\n' >&2
+    exit 1
+  fi
+  /bin/cp -R \
+    "${bootstrap_build_root}/Who Am I.app" \
+    "${stage_root}/Who Am I.app"
+  embedded_product_root="${stage_root}/Who Am I.app/Contents/Resources/product"
+  /bin/mkdir -p "${embedded_product_root}"
+  for embedded_entry in \
+    "Install Who Am I.command" \
+    VERSION \
+    install.sh \
+    product.lock \
+    runtime.lock \
+    runtime-source \
+    scripts \
+    apps \
+    uninstall-runtime.sh \
+    update.sh; do
+    /bin/mv \
+      "${stage_root}/${embedded_entry}" \
+      "${embedded_product_root}/${embedded_entry}"
+  done
+  /bin/cp "${stage_root}/LICENSE" "${embedded_product_root}/LICENSE"
+  /bin/cp \
+    "${stage_root}/THIRD_PARTY_NOTICES.md" \
+    "${embedded_product_root}/THIRD_PARTY_NOTICES.md"
+  native_app_included=true
+fi
+
 unsafe_link="$(
   /usr/bin/find "${stage_root}" -type l -print -quit 2>/dev/null || true
 )"
@@ -226,7 +305,9 @@ fi
 cat > "${stage_root}/README.txt" <<EOF
 Who Am I ${version} — self-contained macOS installer
 
-Double-click "Install Who Am I.command".
+Double-click "Who Am I.app". The App contains its verified local backend and
+the pinned Personal Model Runtime. On first launch it initializes this Mac's
+Personal Model, then opens the native Spotlight-style Who Am I experience.
 
 This package contains Personal Model Runtime commit ${RUNTIME_COMMIT}.
 Installation does not access the Personal Model source repository.
@@ -242,6 +323,10 @@ runtime_project=${RUNTIME_PROJECT_NAME}
 runtime_version=${RUNTIME_PROJECT_VERSION}
 runtime_delivery=embedded
 personal_data_included=false
+native_app_included=${native_app_included}
+native_app_entrypoint=Who Am I.app
+backend_embedded_in_app=${native_app_included}
+embedded_product_path=Who Am I.app/Contents/Resources/product
 EOF
 
 # A DMG preserves the builder's numeric owner. Release contents therefore
@@ -250,16 +335,49 @@ EOF
 # own 0077 umask.
 /usr/bin/find "${stage_root}" -exec /bin/chmod a+rX,u+w,go-w {} +
 /bin/chmod 0755 \
-  "${stage_root}/Install Who Am I.command" \
-  "${stage_root}/install.sh" \
-  "${stage_root}/uninstall-runtime.sh" \
-  "${stage_root}/update.sh" \
-  "${stage_root}/scripts/diagnose.sh" \
-  "${stage_root}/scripts/verify-product.sh" \
-  "${stage_root}/scripts/verify.sh" \
-  "${stage_root}/apps/personal-card/设置我的 Personal Model.command" \
-  "${runtime_stage}/install.sh" \
-  "${runtime_stage}/uninstall.sh"
+  "${embedded_product_root}/Install Who Am I.command" \
+  "${embedded_product_root}/install.sh" \
+  "${embedded_product_root}/uninstall-runtime.sh" \
+  "${embedded_product_root}/update.sh" \
+  "${embedded_product_root}/scripts/diagnose.sh" \
+  "${embedded_product_root}/scripts/verify-product.sh" \
+  "${embedded_product_root}/scripts/verify.sh" \
+  "${embedded_product_root}/apps/personal-card/设置我的 Personal Model.command" \
+  "${embedded_product_root}/runtime-source/install.sh" \
+  "${embedded_product_root}/runtime-source/uninstall.sh"
+
+if [[ "${native_app_included}" == "true" ]]; then
+  embedded_manifest_temporary="${temporary_root}/EMBEDDED-SHA256SUMS"
+  (
+    cd "${embedded_product_root}"
+    /usr/bin/find . -type f -print0 \
+      | LC_ALL=C /usr/bin/sort -z \
+      | /usr/bin/xargs -0 /usr/bin/shasum -a 256 \
+      > "${embedded_manifest_temporary}"
+    /bin/mv "${embedded_manifest_temporary}" SELF-CONTAINED-SHA256SUMS
+    /usr/bin/shasum -a 256 --check SELF-CONTAINED-SHA256SUMS >/dev/null
+  )
+  /bin/chmod 0644 "${embedded_product_root}/SELF-CONTAINED-SHA256SUMS"
+  /usr/bin/codesign \
+    --force \
+    --sign - \
+    --timestamp=none \
+    "${stage_root}/Who Am I.app"
+  /usr/bin/codesign --verify --strict "${stage_root}/Who Am I.app"
+  /usr/bin/lipo \
+    "${stage_root}/Who Am I.app/Contents/MacOS/WhoAmI" \
+    -verify_arch arm64 x86_64
+  if [[ "$(/usr/bin/plutil -extract WhoAmIBootstrapInstall raw -o - \
+    "${stage_root}/Who Am I.app/Contents/Info.plist")" != "true" ]]; then
+    printf 'Packaged native App is not the first-run launcher.\n' >&2
+    exit 1
+  fi
+  if [[ ! -x "${embedded_product_root}/Install Who Am I.command" \
+    || ! -d "${embedded_product_root}/runtime-source/.git" ]]; then
+    printf 'Native App does not contain its verified backend payload.\n' >&2
+    exit 1
+  fi
+fi
 
 manifest_temporary="${temporary_root}/SELF-CONTAINED-SHA256SUMS"
 (

@@ -232,6 +232,13 @@ TEMPORARY_ROOT="$(runtime_temporary_root_create "product-pilot-gate")"
   /usr/bin/grep -Fxq "release_status=GO" RELEASE-METADATA.txt
   /usr/bin/grep -Fxq "pilot_status=HOLD" RELEASE-METADATA.txt
   /usr/bin/grep -Fxq "runtime_delivery=embedded" RELEASE-METADATA.txt
+  /usr/bin/grep -Fxq "native_app_included=true" RELEASE-METADATA.txt
+  /usr/bin/grep -Fxq "native_app_entrypoint=Who Am I.app" \
+    RELEASE-METADATA.txt
+  /usr/bin/grep -Fxq "backend_embedded_in_app=true" RELEASE-METADATA.txt
+  /usr/bin/grep -Fxq \
+    "embedded_product_path=Who Am I.app/Contents/Resources/product" \
+    RELEASE-METADATA.txt
   /usr/bin/grep -Fxq "dmg_asset=${dmg_name}" RELEASE-METADATA.txt
   /usr/bin/grep -Fxq "tar_asset=${bundle_name}" RELEASE-METADATA.txt
 )

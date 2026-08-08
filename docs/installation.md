@@ -37,15 +37,18 @@ bash install.sh --print-plan
 There is no approved Who Am I GitHub Release while `RELEASE_STATUS=HOLD`.
 After a reviewed `GO`, download the self-contained DMG and `SHA256SUMS` from
 one immutable GitHub Release, verify the checksum, open the DMG, and
-double-click `Install Who Am I.command`. The DMG contains the pinned Personal
-Model source; the installer does not visit its separate GitHub repository.
+double-click `Who Am I.app`. The native first-run window opens the verified
+installer and switches to the installed App when initialization finishes. The
+App bundle contains the recovery installer, local Node backend, and pinned
+Personal Model source; the installer does not visit its
+separate GitHub repository.
 
 The verified `.tar.gz` contains the same installer and is the command-line
 fallback. Use this after entering its extracted
 `who-am-i-<version>-self-contained-macos` directory:
 
 ```bash
-bash install.sh --interactive
+bash "Who Am I.app/Contents/Resources/product/Install Who Am I.command"
 ```
 
 The installer first checks the fixed local Runtime path. An existing
@@ -68,15 +71,15 @@ downloaded release directory is removed. The product additionally installs:
 
 - versioned Card code and private Node under
   `~/.persome/product-app/<product-version>`;
-- a universal AppKit + WKWebView application at
+- a universal native SwiftUI/AppKit application at
   `~/Applications/Who Am I.app`;
 - owner Profile and Card state under
   `~/Library/Application Support/Who Am I` after first use.
 
-Opening `Who Am I.app` creates an independent macOS window and starts the
-owner-local Card service for that window. It does not open the Card URL in the
-default browser. The existing HTML UI remains an internal implementation asset
-so the approved visual baseline and interactions do not change.
+Opening `Who Am I.app` starts the owner-local backend and shows a transparent,
+Spotlight-style native panel. The App remains in the macOS menu bar at the
+upper-right and can be reopened through Spotlight. It does not render the
+product through HTML or open a Card URL in a browser.
 
 When a ready standalone Personal Model already exists, opening Who Am I
 connects it automatically. A secure `~/.persome/who-am-i/profile.json` identity

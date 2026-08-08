@@ -125,57 +125,14 @@ jobs:
         shell: bash
         run: bash scripts/validate-runtime-lock.sh
 
-      - name: Build and validate self-contained production bundle
+      - name: Require macOS for the distributable App bundle
         shell: bash
         run: |
-          version="$(tr -d '[:space:]' < VERSION)"
-          package_name="who-am-i-${version}-self-contained-macos"
-          output_directory="${RUNNER_TEMP}/self-contained-linux"
-          extracted_directory="${RUNNER_TEMP}/self-contained-linux-extracted"
-
-          bash scripts/build-self-contained-package.sh \
-            --output-directory "${output_directory}"
-          test -f "${output_directory}/${package_name}.tar.gz"
-          test -f "${output_directory}/SHA256SUMS"
-          test ! -e "${output_directory}/${package_name}.dmg"
-          test "$(find "${output_directory}" -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 2
-          (
-            cd "${output_directory}"
-            sha256sum --check SHA256SUMS
-          )
-
-          mkdir "${extracted_directory}"
-          tar -xzf \
-            "${output_directory}/${package_name}.tar.gz" \
-            -C "${extracted_directory}"
-          package_root="${extracted_directory}/${package_name}"
-          (
-            cd "${package_root}"
-            sha256sum --check SELF-CONTAINED-SHA256SUMS
-          )
-          test ! -e "${package_root}/apps/personal-card/fixtures"
-          test ! -e "${package_root}/apps/personal-card/tests"
-          test ! -e "${package_root}/apps/personal-card/node_modules"
-          test -d "${package_root}/runtime-source/.git"
-
-          # Run the production-payload contract against the exact bundle.
-          mkdir -p "${package_root}/apps/personal-card/tests/release"
-          cp \
-            apps/personal-card/tests/release/production-install-payload.test.mjs \
-            "${package_root}/apps/personal-card/tests/release/"
-          node --test \
-            "${package_root}/apps/personal-card/tests/release/production-install-payload.test.mjs"
-
-          # The embedded Runtime must be the reviewed lock, with no network
-          # remote left for install-time source access.
-          source scripts/lib/runtime-lock.sh
-          runtime_lock_load runtime.lock
-          test "$(git -C "${package_root}/runtime-source" rev-parse HEAD)" = \
-            "${RUNTIME_COMMIT}"
-          test "$(git -C "${package_root}/runtime-source" rev-parse 'HEAD^{tree}')" = \
-            "${RUNTIME_TREE}"
-          test -z "$(git -C "${package_root}/runtime-source" remote)"
-          bash "${package_root}/install.sh" --print-plan
+          if bash scripts/build-self-contained-package.sh \
+            --output-directory "${RUNNER_TEMP}/unexpected-macos-app"; then
+            printf 'The macOS App builder unexpectedly ran on Linux.\n' >&2
+            exit 1
+          fi
 
   macos:
     name: macOS prerequisites (${{ matrix.architecture }})
@@ -248,6 +205,20 @@ jobs:
               "${app}/Contents/Info.plist"
           )" = "${version}"
 
+          bootstrap_output="${RUNNER_TEMP}/native-bootstrap"
+          bash apps/personal-card/macos/build-native-launcher.sh \
+            --bootstrap \
+            --product-version "${version}" \
+            --output-directory "${bootstrap_output}"
+          bootstrap_app="${bootstrap_output}/Who Am I.app"
+          lipo "${bootstrap_app}/Contents/MacOS/WhoAmI" \
+            -verify_arch arm64 x86_64
+          codesign --verify --strict "${bootstrap_app}"
+          test "$(
+            plutil -extract WhoAmIBootstrapInstall raw -o - \
+              "${bootstrap_app}/Contents/Info.plist"
+          )" = "true"
+
   macos-install:
     name: macOS isolated install (arm64)
     needs: repository
@@ -299,23 +270,61 @@ jobs:
             cd "${package_root}"
             shasum -a 256 --check SELF-CONTAINED-SHA256SUMS
           )
-          test -d "${package_root}/runtime-source/.git"
+          app="${package_root}/Who Am I.app"
+          product_root="${app}/Contents/Resources/product"
+          test -d "${product_root}/runtime-source/.git"
+          test -x "${product_root}/Install Who Am I.command"
+          (
+            cd "${product_root}"
+            shasum -a 256 --check SELF-CONTAINED-SHA256SUMS
+          )
+          test -x "${app}/Contents/MacOS/WhoAmI"
+          codesign --verify --deep --strict "${app}"
+          lipo "${app}/Contents/MacOS/WhoAmI" \
+            -verify_arch arm64 x86_64
+          test "$(
+            plutil -extract WhoAmIBootstrapInstall raw -o - \
+              "${app}/Contents/Info.plist"
+          )" = "true"
+          grep -Fxq 'native_app_included=true' \
+            "${package_root}/PACKAGE-METADATA.txt"
+          grep -Fxq 'backend_embedded_in_app=true' \
+            "${package_root}/PACKAGE-METADATA.txt"
 
           source scripts/lib/runtime-lock.sh
           runtime_lock_load runtime.lock
-          test "$(git -C "${package_root}/runtime-source" rev-parse HEAD)" = \
+          test "$(git -C "${product_root}/runtime-source" rev-parse HEAD)" = \
             "${RUNTIME_COMMIT}"
-          test "$(git -C "${package_root}/runtime-source" rev-parse 'HEAD^{tree}')" = \
+          test "$(git -C "${product_root}/runtime-source" rev-parse 'HEAD^{tree}')" = \
             "${RUNTIME_TREE}"
-          test -z "$(git -C "${package_root}/runtime-source" remote)"
-          printf 'product-root=%s\n' "${package_root}" >> "${GITHUB_OUTPUT}"
+          test -z "$(git -C "${product_root}/runtime-source" remote)"
+          printf 'dmg-path=%s\n' \
+            "${output_directory}/${package_name}.dmg" >> "${GITHUB_OUTPUT}"
 
       - name: Foundation regression tests
         shell: bash
         run: bash tests/foundation.sh
 
-      - name: Install, diagnose, and preserve-data uninstall from package
+      - name: Install, diagnose, and preserve-data uninstall from mounted DMG
         shell: bash
         env:
-          WHOAMI_SMOKE_PRODUCT_ROOT: ${{ steps.self-contained-package.outputs.product-root }}
-        run: bash scripts/smoke-install.sh --uninstall-via-receipt
+          WHOAMI_DMG_PATH: ${{ steps.self-contained-package.outputs.dmg-path }}
+        run: |
+          mount_point="${RUNNER_TEMP}/whoami-mounted-dmg"
+          mkdir "${mount_point}"
+          hdiutil attach \
+            -readonly \
+            -nobrowse \
+            -mountpoint "${mount_point}" \
+            "${WHOAMI_DMG_PATH}"
+          cleanup_mount() {
+            hdiutil detach "${mount_point}" >/dev/null || true
+          }
+          trap cleanup_mount EXIT
+          app="${mount_point}/Who Am I.app"
+          product_root="${app}/Contents/Resources/product"
+          test -x "${app}/Contents/MacOS/WhoAmI"
+          test -x "${product_root}/Install Who Am I.command"
+          codesign --verify --deep --strict "${app}"
+          WHOAMI_SMOKE_PRODUCT_ROOT="${product_root}" \
+            bash scripts/smoke-install.sh --uninstall-via-receipt

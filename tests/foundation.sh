@@ -549,6 +549,29 @@ test_product_installer_never_fetches_runtime_source() {
   fi
 }
 
+test_personal_card_replacement_is_transactional() {
+  local installer="${PRODUCT_ROOT}/install.sh"
+
+  grep -Fq 'personal_card_transaction_rollback()' "${installer}"
+  grep -Fq 'personal_card_transaction_commit()' "${installer}"
+  grep -Fq 'PERSONAL_CARD_TRANSACTION_ACTIVE=1' "${installer}"
+  grep -Fq 'after-card-before-verification' "${installer}"
+  [[ "$(grep -Fc 'personal_card_transaction_commit' "${installer}")" -eq 4 ]]
+  [[ "$(grep -Fc 'installer_test_failpoint "after-card-before-verification"' \
+    "${installer}")" -eq 3 ]]
+  awk '
+    /install_personal_card$/ { installed++ }
+    /verify-product\.sh"$/ { verified++ }
+    /personal_card_transaction_commit$/ {
+      if (installed < 1 || verified < 1) exit 1
+      committed++
+      installed=0
+      verified=0
+    }
+    END { if (committed != 3) exit 1 }
+  ' "${installer}"
+}
+
 test_receipt_round_trip() {
   local install_home="${TEST_HOME}/receipt-round-trip"
   local receipt="${install_home}/product-runtime.lock"
@@ -2300,6 +2323,8 @@ run_case "bundled Runtime checkout rejects symbolic links" \
   test_bundled_runtime_checkout_rejects_symlinks
 run_case "product installer never fetches the Runtime source repository" \
   test_product_installer_never_fetches_runtime_source
+run_case "Personal Card replacement rolls back until verification commits" \
+  test_personal_card_replacement_is_transactional
 
 run_case "Runtime receipt matches the pinned lock" test_receipt_round_trip
 run_case "tampered Runtime receipt is rejected" test_tampered_receipt_rejected

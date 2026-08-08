@@ -275,6 +275,36 @@ for package_asset in "${dmg_name}" "${bundle_name}"; do
   fi
 done
 
+/bin/mkdir "${package_build_root}/extracted"
+/usr/bin/tar -xzf \
+  "${package_build_root}/package/${bundle_name}" \
+  -C "${package_build_root}/extracted"
+native_app_path="${package_build_root}/extracted/${package_name}/Who Am I.app"
+embedded_product_path="${native_app_path}/Contents/Resources/product"
+if [[ ! -d "${native_app_path}" \
+  || ! -x "${native_app_path}/Contents/MacOS/WhoAmI" ]]; then
+  printf 'Self-contained package does not contain the native App entry point.\n' >&2
+  exit 1
+fi
+/usr/bin/codesign --verify --strict "${native_app_path}"
+/usr/bin/lipo "${native_app_path}/Contents/MacOS/WhoAmI" \
+  -verify_arch arm64 x86_64
+if [[ "$(/usr/bin/plutil -extract WhoAmIBootstrapInstall raw -o - \
+  "${native_app_path}/Contents/Info.plist")" != "true" ]]; then
+  printf 'Release App is not configured for first-run installation.\n' >&2
+  exit 1
+fi
+if [[ ! -x "${embedded_product_path}/Install Who Am I.command" \
+  || ! -d "${embedded_product_path}/runtime-source/.git" \
+  || ! -f "${embedded_product_path}/apps/personal-card/persome-card-server.mjs" ]]; then
+  printf 'Self-contained App does not contain its backend and Runtime.\n' >&2
+  exit 1
+fi
+(
+  cd "${embedded_product_path}"
+  /usr/bin/shasum -a 256 --check SELF-CONTAINED-SHA256SUMS >/dev/null
+)
+
 /bin/mkdir "${OUTPUT_DIRECTORY}"
 /bin/cp \
   "${package_build_root}/package/${dmg_name}" \
@@ -295,6 +325,10 @@ runtime_lock_load runtime.lock
   printf 'runtime_project=%s\n' "${RUNTIME_PROJECT_NAME}"
   printf 'runtime_version=%s\n' "${RUNTIME_PROJECT_VERSION}"
   printf 'runtime_delivery=embedded\n'
+  printf 'native_app_included=true\n'
+  printf 'native_app_entrypoint=Who Am I.app\n'
+  printf 'backend_embedded_in_app=true\n'
+  printf 'embedded_product_path=Who Am I.app/Contents/Resources/product\n'
   printf 'dmg_asset=%s\n' "${dmg_name}"
   printf 'tar_asset=%s\n' "${bundle_name}"
 } > "${OUTPUT_DIRECTORY}/RELEASE-METADATA.txt"
@@ -315,8 +349,9 @@ This release contains exactly these five assets:
 ### Install from a public repository
 
 For the normal macOS flow, verify \`${dmg_name}\` against \`SHA256SUMS\`, open
-the DMG, and double-click \`Install Who Am I.command\`. The equivalent command
-line flow is:
+the DMG, and double-click \`Who Am I.app\`. Its native first-run window opens
+the verified installer and then launches the installed App. The equivalent
+command-line flow is:
 
 \`\`\`bash
 (
@@ -349,7 +384,7 @@ line flow is:
   shasum -a 256 --check SHA256SUMS
   tar -xzf "${bundle_name}"
   cd "${package_name}"
-  bash install.sh --interactive
+  bash "Who Am I.app/Contents/Resources/product/Install Who Am I.command"
 )
 \`\`\`
 
@@ -388,7 +423,7 @@ Install and authenticate the GitHub CLI first, then run:
   shasum -a 256 --check SHA256SUMS
   tar -xzf "${bundle_name}"
   cd "${package_name}"
-  bash install.sh --interactive
+  bash "Who Am I.app/Contents/Resources/product/Install Who Am I.command"
 )
 \`\`\`
 EOF
@@ -404,7 +439,7 @@ for required_recipe_marker in \
   'find . -maxdepth 1 -type f | wc -l' \
   '--retry 3 --retry-delay 2 --retry-all-errors' \
   'shasum -a 256 --check SHA256SUMS' \
-  'bash install.sh --interactive'; do
+  'bash "Who Am I.app/Contents/Resources/product/Install Who Am I.command"'; do
   if ! /usr/bin/grep -Fq -- \
     "${required_recipe_marker}" "${OUTPUT_DIRECTORY}/RELEASE-NOTES.md"; then
     printf 'Generated install recipe is missing a fail-closed marker: %s\n' \

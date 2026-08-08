@@ -13,7 +13,7 @@ not permission to invent a feature.
 | Product name and one-sentence promise | Who Am I · Personal Card — install a local Card backed by the Personal Model owned by this macOS account | V5 handoff and repository README | Product owner |
 | Primary beta user | invited macOS user who wants an owner-local Personal Model and Card | 100-user beta request | Product owner |
 | Problem being solved | make local memory/model state visible and reusable without mixing identities | Card/Provider contract | Product owner |
-| Single golden path: trigger → steps → visible result | verified release → interactive install → create local name/handle → finish Persome onboarding → Card opens on this user's model | browser and server acceptance tests | Product owner |
+| Single golden path: trigger → steps → visible result | verified release → open `Who Am I.app` → first-run install → create local name/handle → finish Persome onboarding → Card opens on this user's model | browser, native launcher and server acceptance tests | Product owner |
 | Entry surface: menu bar, desktop app, web UI, CLI, agent client, or other | `~/Applications/Who Am I.app` opens a loopback Personal Card; optional Codex plugin | installer and app launcher | Product engineering |
 | Definition of a successful first session | stable `local-*` model ID, own handle visible, production has no Cecilia/Lin, Runtime MCP answers; sparse/forming state is truthful | production-owner and two-owner tests | Product owner |
 | Explicit beta exclusions | cloud accounts/sync, silent macOS permission approval, multiple people in one macOS account, signed/notarized package, automated product-app uninstall | known issues | Release owner |
@@ -117,7 +117,7 @@ rest of the local foundation.
 | --- | --- | --- |
 | Public or private GitHub repository | public: `Intuition-Lab/who-am-i-personal-card` | product owner decision, 2026-08-07 |
 | How the 100 testers receive access | controlled 5 → 20 → 75 waves from an immutable GitHub Release | beta runbook |
-| Install command and artifact | checksum-verified self-contained DMG; equivalent `.tar.gz` fallback runs `bash install.sh --interactive` | README / release workflow |
+| Install command and artifact | checksum-verified self-contained DMG; equivalent `.tar.gz` fallback runs the verified recovery command inside `Who Am I.app/Contents/Resources/product` | README / release workflow |
 | Code signing/notarization requirement for this beta | unsigned and unnotarized candidate; explicit tester disclosure required | known issues / release owner |
 | Auto-update, manual update, or reinstall | manual immutable-release update via `bash update.sh --interactive` | installation docs |
 | Product uninstall behavior | not automated in this candidate; must not be confused with Runtime removal | known issues |

@@ -108,7 +108,7 @@ installer_test_failpoint() {
     return 2
   fi
   case "${requested_phase}" in
-    after-upstream-before-receipts) ;;
+    after-upstream-before-receipts|after-card-before-verification) ;;
     *)
       printf 'Unknown installer test failpoint: %s\n' "${requested_phase}" >&2
       return 2
@@ -118,6 +118,57 @@ installer_test_failpoint() {
     printf 'Foundation test failpoint reached: %s\n' "${phase}" >&2
     return 86
   fi
+}
+
+PERSONAL_CARD_TRANSACTION_ACTIVE=0
+PERSONAL_CARD_TARGET_ROOT=""
+PERSONAL_CARD_PREVIOUS_TARGET_ROOT=""
+PERSONAL_CARD_APP_BUNDLE=""
+PERSONAL_CARD_PREVIOUS_APP_BUNDLE=""
+
+personal_card_transaction_rollback() {
+  [[ "${PERSONAL_CARD_TRANSACTION_ACTIVE:-0}" -eq 1 ]] || return 0
+  local failed_target="${temporary_root}/failed-personal-card"
+  local failed_app="${temporary_root}/failed-Who-Am-I.app"
+
+  stop_previous_product_card_server || true
+  if [[ -e "${PERSONAL_CARD_TARGET_ROOT}" || -L "${PERSONAL_CARD_TARGET_ROOT}" ]]; then
+    if [[ ! -d "${PERSONAL_CARD_TARGET_ROOT}" || -L "${PERSONAL_CARD_TARGET_ROOT}" ]]; then
+      printf 'Cannot safely roll back the new Personal Card payload.\n' >&2
+      return 1
+    fi
+    /bin/mv "${PERSONAL_CARD_TARGET_ROOT}" "${failed_target}"
+  fi
+  if [[ -n "${PERSONAL_CARD_PREVIOUS_TARGET_ROOT}" \
+    && -d "${PERSONAL_CARD_PREVIOUS_TARGET_ROOT}" \
+    && ! -L "${PERSONAL_CARD_PREVIOUS_TARGET_ROOT}" ]]; then
+    /bin/mv "${PERSONAL_CARD_PREVIOUS_TARGET_ROOT}" \
+      "${PERSONAL_CARD_TARGET_ROOT}"
+  fi
+
+  if [[ -e "${PERSONAL_CARD_APP_BUNDLE}" || -L "${PERSONAL_CARD_APP_BUNDLE}" ]]; then
+    if [[ ! -d "${PERSONAL_CARD_APP_BUNDLE}" || -L "${PERSONAL_CARD_APP_BUNDLE}" ]]; then
+      printf 'Cannot safely roll back the new Who Am I App.\n' >&2
+      return 1
+    fi
+    /bin/mv "${PERSONAL_CARD_APP_BUNDLE}" "${failed_app}"
+  fi
+  if [[ -n "${PERSONAL_CARD_PREVIOUS_APP_BUNDLE}" \
+    && -d "${PERSONAL_CARD_PREVIOUS_APP_BUNDLE}" \
+    && ! -L "${PERSONAL_CARD_PREVIOUS_APP_BUNDLE}" ]]; then
+    /bin/mv "${PERSONAL_CARD_PREVIOUS_APP_BUNDLE}" \
+      "${PERSONAL_CARD_APP_BUNDLE}"
+  fi
+  PERSONAL_CARD_TRANSACTION_ACTIVE=0
+  printf 'Restored the previous verified Who Am I installation.\n' >&2
+}
+
+personal_card_transaction_commit() {
+  PERSONAL_CARD_TRANSACTION_ACTIVE=0
+  PERSONAL_CARD_TARGET_ROOT=""
+  PERSONAL_CARD_PREVIOUS_TARGET_ROOT=""
+  PERSONAL_CARD_APP_BUNDLE=""
+  PERSONAL_CARD_PREVIOUS_APP_BUNDLE=""
 }
 
 print_plan() {
@@ -341,6 +392,8 @@ install_personal_card() {
 
   if [[ ! -f "${source_root}/macos/WhoAmIApp.swift" \
     || -L "${source_root}/macos/WhoAmIApp.swift" \
+    || ! -f "${source_root}/macos/WhoAmINativeUI.swift" \
+    || -L "${source_root}/macos/WhoAmINativeUI.swift" \
     || ! -f "${source_root}/macos/build-native-launcher.sh" \
     || -L "${source_root}/macos/build-native-launcher.sh" ]]; then
     printf 'Native Who Am I launcher source is missing or unsafe.\n' >&2
@@ -400,6 +453,11 @@ install_personal_card() {
     printf 'Could not install the native Who Am I app.\n' >&2
     return 1
   fi
+  PERSONAL_CARD_TARGET_ROOT="${target_root}"
+  PERSONAL_CARD_PREVIOUS_TARGET_ROOT="${previous_target_root:-}"
+  PERSONAL_CARD_APP_BUNDLE="${app_bundle}"
+  PERSONAL_CARD_PREVIOUS_APP_BUNDLE="${previous_app_bundle:-}"
+  PERSONAL_CARD_TRANSACTION_ACTIVE=1
   printf 'Installed Who Am I to %s\n' "${app_bundle}"
 }
 
@@ -759,6 +817,9 @@ cleanup() {
   local cleanup_status=$?
   local intent_path="${RUNTIME_INSTALL_HOME}/product-runtime.installing"
 
+  if [[ "${cleanup_status}" -ne 0 ]]; then
+    personal_card_transaction_rollback || cleanup_status=1
+  fi
   # If an existing Runtime update failed and the upstream transaction restored
   # its previously verified venv, remove only the target-lock intent. A fresh
   # failed install deliberately keeps its intent for offline uninstall.
@@ -788,7 +849,9 @@ install_state_preflight
 if [[ "${EXTERNAL_EXISTING}" -eq 1 ]]; then
   temporary_root="$(runtime_temporary_root_create "personal-model-product")"
   install_personal_card
+  installer_test_failpoint "after-card-before-verification"
   /bin/bash "${PRODUCT_ROOT}/scripts/verify-product.sh"
+  personal_card_transaction_commit
   cat <<EOF
 
 Existing Personal Model detected and preserved.
@@ -813,8 +876,10 @@ if [[ "${MANAGED_EXISTING}" -eq 1 \
   runtime_checkout_verify "${temporary_root}/runtime"
   install_management_bundle "${temporary_root}/runtime"
   install_personal_card
+  installer_test_failpoint "after-card-before-verification"
   /bin/bash "${PRODUCT_ROOT}/scripts/verify.sh" --quick
   /bin/bash "${PRODUCT_ROOT}/scripts/verify-product.sh"
+  personal_card_transaction_commit
   cat <<EOF
 
 The installed Personal Model already matches this product's pinned Runtime.
@@ -907,8 +972,10 @@ install_management_bundle "${temporary_root}/runtime"
 runtime_receipt_write "${RUNTIME_INSTALL_HOME}/venv/.product-runtime.lock"
 runtime_receipt_write "${RUNTIME_INSTALL_HOME}/product-runtime.lock"
 install_personal_card
+installer_test_failpoint "after-card-before-verification"
 /bin/bash "${PRODUCT_ROOT}/scripts/verify.sh" --quick
 /bin/bash "${PRODUCT_ROOT}/scripts/verify-product.sh"
+personal_card_transaction_commit
 intent_path="${RUNTIME_INSTALL_HOME}/product-runtime.installing"
 runtime_receipt_path_validate "${intent_path}"
 /bin/rm -f -- "${intent_path}"

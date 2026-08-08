@@ -174,21 +174,58 @@ jobs:
           )
           mkdir extracted
           tar -xzf "dist/${tar_name}" -C extracted
-          test -x "extracted/${package_name}/install.sh"
-          test -d "extracted/${package_name}/runtime-source/.git"
-          test -z "$(git -C "extracted/${package_name}/runtime-source" remote)"
           grep -Fxq "package=${package_name}" \
             "extracted/${package_name}/PACKAGE-METADATA.txt"
           grep -Fxq 'runtime_delivery=embedded' \
             "extracted/${package_name}/PACKAGE-METADATA.txt"
+          grep -Fxq 'native_app_included=true' \
+            "extracted/${package_name}/PACKAGE-METADATA.txt"
+          grep -Fxq 'native_app_entrypoint=Who Am I.app' \
+            "extracted/${package_name}/PACKAGE-METADATA.txt"
+          grep -Fxq 'backend_embedded_in_app=true' \
+            "extracted/${package_name}/PACKAGE-METADATA.txt"
+          app="extracted/${package_name}/Who Am I.app"
+          product_root="${app}/Contents/Resources/product"
+          test -x "${product_root}/install.sh"
+          test -x "${product_root}/Install Who Am I.command"
+          test -d "${product_root}/runtime-source/.git"
+          test -z "$(git -C "${product_root}/runtime-source" remote)"
+          (
+            cd "${product_root}"
+            shasum -a 256 --check SELF-CONTAINED-SHA256SUMS
+          )
+          test -x "${app}/Contents/MacOS/WhoAmI"
+          codesign --verify --deep --strict "${app}"
+          lipo "${app}/Contents/MacOS/WhoAmI" \
+            -verify_arch arm64 x86_64
+          test "$(
+            plutil -extract WhoAmIBootstrapInstall raw -o - \
+              "${app}/Contents/Info.plist"
+          )" = "true"
 
-      - name: Install and verify the final self-contained tar payload
+      - name: Install and verify the final mounted DMG App
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
           package_name="who-am-i-${version}-self-contained-macos"
           bash tests/foundation.sh
-          WHOAMI_SMOKE_PRODUCT_ROOT="${GITHUB_WORKSPACE}/extracted/${package_name}" \
+          mount_point="${RUNNER_TEMP}/whoami-mounted-dmg-${{ matrix.architecture }}"
+          mkdir "${mount_point}"
+          hdiutil attach \
+            -readonly \
+            -nobrowse \
+            -mountpoint "${mount_point}" \
+            "dist/${package_name}.dmg"
+          cleanup_mount() {
+            hdiutil detach "${mount_point}" >/dev/null || true
+          }
+          trap cleanup_mount EXIT
+          app="${mount_point}/Who Am I.app"
+          product_root="${app}/Contents/Resources/product"
+          test -x "${app}/Contents/MacOS/WhoAmI"
+          test -x "${product_root}/Install Who Am I.command"
+          codesign --verify --deep --strict "${app}"
+          WHOAMI_SMOKE_PRODUCT_ROOT="${product_root}" \
             bash scripts/smoke-install.sh --uninstall-via-receipt
 
   publish:
@@ -253,6 +290,13 @@ jobs:
           grep -Fxq "release_status=GO" dist/RELEASE-METADATA.txt
           grep -Fxq "pilot_status=HOLD" dist/RELEASE-METADATA.txt
           grep -Fxq "runtime_delivery=embedded" dist/RELEASE-METADATA.txt
+          grep -Fxq "native_app_included=true" dist/RELEASE-METADATA.txt
+          grep -Fxq "native_app_entrypoint=Who Am I.app" \
+            dist/RELEASE-METADATA.txt
+          grep -Fxq "backend_embedded_in_app=true" dist/RELEASE-METADATA.txt
+          grep -Fxq \
+            "embedded_product_path=Who Am I.app/Contents/Resources/product" \
+            dist/RELEASE-METADATA.txt
           grep -Fxq "dmg_asset=${dmg_name}" dist/RELEASE-METADATA.txt
           grep -Fxq "tar_asset=${tar_name}" dist/RELEASE-METADATA.txt
           source scripts/lib/runtime-lock.sh

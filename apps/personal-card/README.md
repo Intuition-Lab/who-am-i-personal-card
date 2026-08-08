@@ -15,16 +15,14 @@ Identity、Swipe 动效和 Notion 式 Report 保持原来的视觉与交互。
 
 ## 内测用户安装
 
-从产品仓库根目录执行：
-
-```bash
-bash install.sh --interactive
-```
+内测用户只从产品仓库的 immutable GitHub Release 下载 DMG。打开 DMG 后
+双击 `Who Am I.app`；不要从源码 clone 或执行浮动分支里的安装脚本。
 
 安装器会安装 `runtime.lock` 固定的 Personal Model commit（其包元数据为
 0.3.2）、产品私有 Node.js、依赖和
-`~/Applications/Who Am I.app`。这是一个 AppKit + WKWebView 独立窗口，
-不会打开默认浏览器。用户完成 macOS 权限后，首次打开只需输入自己的姓名
+`~/Applications/Who Am I.app`。这是一个 SwiftUI/AppKit 原生应用：常驻
+屏幕右上角菜单栏，并以透明 Spotlight 面板打开，不会加载 WebView 或默认
+浏览器。用户完成 macOS 权限后，首次打开只需输入自己的姓名
 和 handle；服务会生成稳定随机的本机 `modelId`，并从该 macOS 账户自己的
 Persome 读取内容。
 
@@ -76,20 +74,20 @@ npm run test:production-browser
 - `npm run visual:baseline` 在 `1440×1000 @ DPR 1` 重新生成当前开发截图到
   `tests/visual/current/`；迁移前基线保存在 `tests/visual/baselines/`。
 
-修改 `WhoAmI v5.template.html` 或 `WhoAmI v5.logic.js` 后，执行：
+旧 V5 HTML/JS 只作为迁移期间的开发基线与浏览器回归夹具。生产 App 的
+界面实现位于 `macos/WhoAmINativeUI.swift`，不得重新引入 WebView。修改旧
+基线夹具后可执行：
 
 ```bash
 npm run build
 ```
 
-它会把源模板与逻辑同步进 `WhoAmI v5.dc.html` 和 App 内部实际加载的
-`WhoAmI v5 · Persome Live.html`。这个 HTML 是应用内部实现资产，不是
-用户需要打开的交付物。
+它会同步开发用 HTML；生产 App 不加载这些文件。
 
 ## 安全边界
 
 - 服务只监听 `127.0.0.1`。
-- 每个 App/WebView 会话得到独立的 `HttpOnly; SameSite=Strict` Cookie。
+- 每个原生 App 会话得到独立的 `HttpOnly; SameSite=Strict` Cookie。
 - 模型切换只在完整 Snapshot 校验和权限投影成功后原子提交。
 - 后续 API 从会话读取 `activeModelId`；请求体或 Query 不能覆盖模型。
 - 未授权字段不会下发到 App，Public Projection 只包含 Card 与 Identity。

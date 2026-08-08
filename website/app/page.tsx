@@ -12,6 +12,7 @@ type ReleaseAsset = {
   browser_download_url: string;
   size: number;
   download_count: number;
+  state: string;
 };
 
 type GithubRelease = {
@@ -21,6 +22,7 @@ type GithubRelease = {
   published_at: string | null;
   prerelease: boolean;
   draft: boolean;
+  immutable: boolean;
   assets: ReleaseAsset[];
 };
 
@@ -29,11 +31,42 @@ type ReleaseState =
   | { status: "ready"; release: GithubRelease | null }
   | { status: "error"; release: null };
 
-function safeAsset(release: GithubRelease | null, suffix: string) {
-  const asset = release?.assets.find((candidate) =>
-    candidate.name.endsWith(suffix),
+const SAFE_TAG = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+
+function expectedAssets(tag: string) {
+  const version = tag.slice(1);
+  const packageName = `who-am-i-${version}-self-contained-macos`;
+  return [
+    `${packageName}.dmg`,
+    `${packageName}.tar.gz`,
+    "RELEASE-METADATA.txt",
+    "RELEASE-NOTES.md",
+    "SHA256SUMS",
+  ];
+}
+
+function approvedRelease(release: GithubRelease) {
+  if (release.draft || release.immutable !== true || !SAFE_TAG.test(release.tag_name)) {
+    return false;
+  }
+  const expected = expectedAssets(release.tag_name);
+  const actual = release.assets.map((asset) => asset.name);
+  if (new Set(actual).size !== expected.length || actual.length !== expected.length) {
+    return false;
+  }
+  if (!expected.every((name) => actual.includes(name))) return false;
+  return release.assets.every((asset) =>
+    asset.state === "uploaded" &&
+    Number.isFinite(asset.size) &&
+    asset.size > 0 &&
+    asset.browser_download_url ===
+      `${SAFE_DOWNLOAD_PREFIX}${release.tag_name}/${asset.name}`
   );
-  if (!asset?.browser_download_url.startsWith(SAFE_DOWNLOAD_PREFIX)) return null;
+}
+
+function safeAsset(release: GithubRelease | null, name: string) {
+  const asset = release?.assets.find((candidate) => candidate.name === name);
+  if (!asset || !release || !approvedRelease(release)) return null;
   return asset;
 }
 
@@ -71,7 +104,7 @@ export default function Home() {
         });
         if (!response.ok) throw new Error("GitHub release request failed");
         const releases = (await response.json()) as GithubRelease[];
-        const release = releases.find((candidate) => !candidate.draft) ?? null;
+        const release = releases.find(approvedRelease) ?? null;
         setReleaseState({ status: "ready", release });
       } catch (error) {
         if ((error as Error).name !== "AbortError") {
@@ -84,7 +117,10 @@ export default function Home() {
   }, []);
 
   const release = releaseState.release;
-  const dmg = useMemo(() => safeAsset(release, ".dmg"), [release]);
+  const dmg = useMemo(() => {
+    if (!release) return null;
+    return safeAsset(release, expectedAssets(release.tag_name)[0]);
+  }, [release]);
   const checksum = useMemo(
     () => release?.assets.find((asset) => asset.name === "SHA256SUMS") ?? null,
     [release],
@@ -177,7 +213,7 @@ export default function Home() {
           <article>
             <span>01</span>
             <h3>下载一个 App</h3>
-            <p>从最新 GitHub Release 下载 DMG，打开后双击安装。</p>
+            <p>从最新 GitHub Release 下载 DMG，打开后双击 Who Am I.app。</p>
           </article>
           <article>
             <span>02</span>

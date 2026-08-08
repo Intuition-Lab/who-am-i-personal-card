@@ -18,9 +18,9 @@ automatically follows every newly published immutable package. While
 `RELEASE_STATUS=HOLD`, it correctly shows that the first download is still
 passing the release gate.
 
-The release candidate includes a native macOS app window, the unchanged Card
-UI, a pinned private Node.js runtime, the complete reviewed Persome Runtime
-source, and verification and support tooling. The optional Codex plugin in
+The release candidate includes a native SwiftUI macOS App, a pinned private
+Node.js backend, the complete reviewed Persome Runtime source, and verification
+and support tooling inside the App bundle. The optional Codex plugin in
 this repository can recall relevant Personal Model context on every turn.
 
 `RELEASE_STATUS` is currently `HOLD`. Tagging this candidate cannot publish a
@@ -64,8 +64,11 @@ model database is never bundled into another person's download.
 After the reviewed release is published, download
 `who-am-i-0.1.0-beta.5-self-contained-macos.dmg` and `SHA256SUMS` from the
 same GitHub Release. Verify the checksum, open the DMG, and double-click
-`Install Who Am I.command`. The installer verifies the complete package again
-before it changes the Mac.
+`Who Am I.app`. Its native first-run window opens the verified installer,
+initializes or connects this Mac's Personal Model, and then opens the installed
+App. The recovery installer is inside the App bundle rather than beside it in
+the DMG. The installer verifies the complete package again before it
+changes the Mac.
 
 The command-line `.tar.gz` is the equivalent fallback for users who cannot use
 the DMG:
@@ -96,19 +99,19 @@ the DMG:
   shasum -a 256 --check SHA256SUMS
   tar -xzf "${PACKAGE}.tar.gz"
   cd "${PACKAGE}"
-  bash install.sh --interactive
+  bash "Who Am I.app/Contents/Resources/product/Install Who Am I.command"
 )
 ```
 
-The application currently receives a local ad-hoc signature during
-installation; it is not Developer ID signed or notarized. macOS may ask the
-user to confirm opening it, and Accessibility and Screen Recording permissions
-must be approved by the signed-in user. On first launch, an existing Personal
-Model connects automatically. A prior Who Am I profile is migrated when
-available; otherwise the macOS account name becomes the initial local Card
-identity. A Mac without an initialized Personal Model keeps the existing
-profile and permission flow. Production never registers the Cecilia or Lin
-development fixtures.
+The DMG entry App and installed application currently receive local ad-hoc
+signatures; they are not Developer ID signed or notarized. macOS may ask the
+user to confirm opening them, and Accessibility and Screen Recording
+permissions must be approved by the signed-in user. On first launch, an
+existing Personal Model connects automatically. A prior Who Am I profile is
+migrated when available; otherwise the macOS account name becomes the initial
+local Card identity. A Mac without an initialized Personal Model keeps the
+existing profile and permission flow. Production never registers the Cecilia
+or Lin development fixtures.
 
 The subshell exits on the first failed download or verification and uses a new
 directory on every attempt, so stale files cannot carry a failed attempt into

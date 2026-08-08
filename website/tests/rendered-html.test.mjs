@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 async function render() {
@@ -37,4 +38,20 @@ test("server-renders the Who Am I release page", async () => {
   assert.match(html, /GitHub 是唯一发布源/);
   assert.match(html, /https:\/\/who-am-i\.example\/og\.png/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Cecilia|Lin · @lin/);
+});
+
+test("download selection requires an immutable exact five-asset release", async () => {
+  const source = await readFile(
+    new URL("../app/page.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /release\.immutable !== true/);
+  assert.match(source, /actual\.length !== expected\.length/);
+  assert.match(source, /asset\.state === "uploaded"/);
+  assert.match(source, /asset\.size > 0/);
+  assert.match(source, /RELEASE-METADATA\.txt/);
+  assert.match(source, /RELEASE-NOTES\.md/);
+  assert.match(source, /SHA256SUMS/);
+  assert.doesNotMatch(source, /find\(\(candidate\) => !candidate\.draft\)/);
+  assert.doesNotMatch(source, /candidate\.name\.endsWith\(suffix\)/);
 });
