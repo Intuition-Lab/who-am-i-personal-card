@@ -1016,6 +1016,7 @@ final class PersonalModelAppState: ObservableObject {
 
 struct WhoAmIRootView: View {
     @StateObject private var state: PersonalModelAppState
+    @State private var isTopMenuOpen = false
 
     init(state: PersonalModelAppState) {
         _state = StateObject(wrappedValue: state)
@@ -1041,6 +1042,7 @@ struct WhoAmIRootView: View {
                     NativeSetupView(state: state)
                 }
             }
+            .padding(.top, 26)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .allowsHitTesting(
                 !state.isMemorySkyOpen
@@ -1054,8 +1056,7 @@ struct WhoAmIRootView: View {
             )
             if state.selectedSection != .card
                 && !state.isShareOpen
-                && !state.isMemorySkyOpen
-                && !state.isRewindDayOpen {
+                && !state.isMemorySkyOpen {
                 NativeReturnToCard(state: state)
                     .frame(maxHeight: .infinity, alignment: .bottom)
                     .padding(.bottom, 18)
@@ -1072,6 +1073,8 @@ struct WhoAmIRootView: View {
                 NativeEvidencePresentation(state: state)
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
+            NativeAppTopBar(state: state, isMenuOpen: $isTopMenuOpen)
+                .zIndex(20)
             if let message = state.correctionMessage {
                 NativeCorrectionToast(
                     message: message,
@@ -1104,6 +1107,237 @@ struct WhoAmIRootView: View {
         } message: {
             Text(state.errorMessage ?? "")
         }
+    }
+}
+
+private struct NativeAppTopBar: View {
+    @ObservedObject var state: PersonalModelAppState
+    @Binding var isMenuOpen: Bool
+    @State private var isRecordingPaused = false
+
+    private var statusLabel: String {
+        if state.snapshot != nil {
+            if state.authorizationLimited { return "Persome · 未授权" }
+            if state.isModelForming { return "You · 正在形成模型" }
+            return "Persome · 已连接"
+        }
+        switch state.setupState {
+        case "profile_required": return "Personal Model · 等待创建"
+        case "not_installed": return "Personal Model · 等待安装"
+        case "onboarding_required": return "Personal Model · 等待权限"
+        case "backend_unavailable": return "Persome · 未连接"
+        default: return "Persome · 连接中"
+        }
+    }
+
+    private var statusColor: Color {
+        if state.authorizationLimited { return .orange }
+        if state.snapshot != nil && !state.isModelForming {
+            return Color(red: 0.31, green: 0.82, blue: 0.44)
+        }
+        if state.setupState == "backend_unavailable" { return .gray }
+        return Color(red: 0.17, green: 0.45, blue: 0.95)
+    }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            if isMenuOpen {
+                Color.black.opacity(0.001)
+                    .contentShape(Rectangle())
+                    .onTapGesture { isMenuOpen = false }
+            }
+
+            HStack(spacing: 16) {
+                Button {
+                    state.selectedSection = .card
+                    isMenuOpen = false
+                } label: {
+                    Text("✳")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color(red: 0.11, green: 0.11, blue: 0.12))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("回到 Who Am I Card")
+
+                Text("Who Am I")
+                    .font(.system(size: 11.5, weight: .semibold))
+
+                Spacer()
+
+                Button {
+                    Task { await state.load() }
+                } label: {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(statusColor)
+                            .frame(width: 6, height: 6)
+                        Text(statusLabel)
+                            .font(.system(size: 10.5))
+                    }
+                    .foregroundStyle(Color(red: 0.29, green: 0.29, blue: 0.31))
+                }
+                .buttonStyle(.plain)
+                .help("刷新 Personal Model")
+
+                Button {
+                    isMenuOpen.toggle()
+                } label: {
+                    NativeMenuGlyph()
+                        .frame(width: 14, height: 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open card menu")
+
+                Text("as of now")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Color(red: 0.16, green: 0.16, blue: 0.18).opacity(0.80))
+                    .monospacedDigit()
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 26)
+            .background(.ultraThinMaterial)
+            .background(Color.white.opacity(0.18))
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(Color.black.opacity(0.10))
+                    .frame(height: 0.5)
+            }
+
+            if isMenuOpen {
+                NativeAppTopMenu(
+                    state: state,
+                    isRecordingPaused: $isRecordingPaused,
+                    close: { isMenuOpen = false }
+                )
+                .padding(.top, 30)
+                .padding(.trailing, 8)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .animation(.easeOut(duration: 0.14), value: isMenuOpen)
+    }
+}
+
+private struct NativeMenuGlyph: View {
+    var body: some View {
+        Canvas { context, _ in
+            var path = Path()
+            path.move(to: CGPoint(x: 1.5, y: 4))
+            path.addLine(to: CGPoint(x: 8.8, y: 4))
+            path.move(to: CGPoint(x: 1.5, y: 7))
+            path.addLine(to: CGPoint(x: 12.5, y: 7))
+            path.move(to: CGPoint(x: 1.5, y: 10))
+            path.addLine(to: CGPoint(x: 6.5, y: 10))
+            context.stroke(
+                path,
+                with: .color(Color(red: 0.16, green: 0.16, blue: 0.18)),
+                style: StrokeStyle(lineWidth: 1.2, lineCap: .round)
+            )
+        }
+    }
+}
+
+private struct NativeAppTopMenu: View {
+    @ObservedObject var state: PersonalModelAppState
+    @Binding var isRecordingPaused: Bool
+    let close: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            NativeTopMenuItem(symbol: "⌕", title: "搜索记忆", shortcut: "⌘K") {
+                close()
+                state.openSearch()
+            }
+            NativeTopMenuItem(symbol: "?", title: "问这张卡") {
+                close()
+                state.openAsk()
+            }
+            NativeTopMenuDivider()
+            NativeTopMenuItem(symbol: "◷", title: "回到某一天") {
+                close()
+                state.openRewind(dayID: nil)
+            }
+            NativeTopMenuItem(symbol: "⌁", title: "继续工作") {
+                close()
+                state.selectedSection = .connectors
+            }
+            NativeTopMenuItem(symbol: "↗", title: "分享这张卡") {
+                close()
+                state.openShare()
+            }
+            NativeTopMenuDivider()
+            NativeTopMenuItem(
+                symbol: "",
+                title: isRecordingPaused ? "记录已暂停 · 恢复" : "正在记录 · 暂停 1 小时",
+                dotColor: isRecordingPaused ? .gray : Color(red: 0.31, green: 0.82, blue: 0.44)
+            ) {
+                isRecordingPaused.toggle()
+                close()
+            }
+        }
+        .padding(5)
+        .frame(width: 236)
+        .background {
+            ZStack {
+                Rectangle().fill(.ultraThinMaterial)
+                Color(red: 0.17, green: 0.17, blue: 0.19).opacity(0.86)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.white.opacity(0.14), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.55), radius: 25, y: 18)
+        .foregroundStyle(Color(red: 0.96, green: 0.96, blue: 0.95))
+    }
+}
+
+private struct NativeTopMenuDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.12))
+            .frame(height: 1)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+    }
+}
+
+private struct NativeTopMenuItem: View {
+    let symbol: String
+    let title: String
+    var shortcut: String? = nil
+    var dotColor: Color? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                if let dotColor {
+                    Circle().fill(dotColor).frame(width: 7, height: 7)
+                        .frame(width: 13)
+                } else {
+                    Text(symbol)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.white.opacity(0.80))
+                        .frame(width: 13)
+                }
+                Text(title)
+                    .font(.system(size: 13))
+                Spacer()
+                if let shortcut {
+                    Text(shortcut)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.white.opacity(0.45))
+                }
+            }
+            .padding(.horizontal, 9)
+            .frame(height: 29)
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -1154,20 +1388,21 @@ private struct NativeReturnToCard: View {
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 22, height: 14)
-                Text("回到卡").font(.callout.weight(.semibold))
+                    .frame(width: 20, height: 13)
+                Text("回到卡").font(.system(size: 12.5, weight: .medium))
                 Text("esc")
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.white.opacity(0.45))
                     .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 4))
+                    .padding(.vertical, 1)
+                    .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .background(.black.opacity(0.82), in: Capsule())
-            .shadow(color: .black.opacity(0.28), radius: 18, y: 10)
+            .foregroundStyle(Color(red: 0.96, green: 0.96, blue: 0.95))
+            .padding(.leading, 12)
+            .padding(.trailing, 18)
+            .padding(.vertical, 8)
+            .background(Color(red: 0.11, green: 0.11, blue: 0.12).opacity(0.90), in: Capsule())
+            .shadow(color: .black.opacity(0.50), radius: 17, y: 14)
         }
         .buttonStyle(.plain)
         .keyboardShortcut(.cancelAction)
@@ -3870,21 +4105,21 @@ private struct NativeRewindView: View {
     private func rewindDay(_ day: DaySnapshot) -> some View {
         GeometryReader { geometry in
             ScrollView {
-                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                LazyVStack(spacing: 0) {
                     Section {
                         VStack(alignment: .leading, spacing: 0) {
                             Text("REWIND · MEMORY DOCUMENT")
-                                .font(.system(size: 9, design: .monospaced))
-                                .tracking(2.2)
-                                .foregroundStyle(Color.black.opacity(0.42))
+                                .font(.system(size: 8.5, design: .monospaced))
+                                .tracking(1.7)
+                                .foregroundStyle(Color(red: 0.60, green: 0.59, blue: 0.56))
                             Text(day.title ?? day.id)
-                                .font(.system(size: 42, weight: .medium, design: .serif))
-                                .tracking(-1.2)
-                                .padding(.top, 13)
+                                .font(.custom("Iowan Old Style", size: 42).weight(.medium))
+                                .tracking(-1.47)
+                                .padding(.top, 6)
                             if let portrait = day.portrait?.trimmedNonEmpty {
                                 Text(portrait)
                                     .font(.system(size: 14.5))
-                                    .foregroundStyle(Color.black.opacity(0.57))
+                                    .foregroundStyle(Color(red: 0.43, green: 0.43, blue: 0.45))
                                     .lineSpacing(8)
                                     .padding(.top, 14)
                                     .frame(maxWidth: 760, alignment: .leading)
@@ -3895,7 +4130,7 @@ private struct NativeRewindView: View {
                                 snapshot: snapshot,
                                 day: day
                             )
-                            .padding(.top, 31)
+                            .padding(.top, 37)
 
                             NativeRewindHighlights(
                                 state: state,
@@ -3915,9 +4150,9 @@ private struct NativeRewindView: View {
                                 VStack(alignment: .leading, spacing: 0) {
                                     HStack {
                                         Text("ROOT · 今天留下的一句")
-                                            .font(.system(size: 9, design: .monospaced))
-                                            .tracking(2)
-                                            .foregroundStyle(Color.black.opacity(0.42))
+                                            .font(.system(size: 8.5, design: .monospaced))
+                                            .tracking(1.7)
+                                            .foregroundStyle(Color(red: 0.60, green: 0.59, blue: 0.56))
                                         Spacer()
                                         Button("生成今日卡 ↗") {
                                             state.openShare(highlight: letterParts.root)
@@ -3932,7 +4167,7 @@ private struct NativeRewindView: View {
                                     } label: {
                                         VStack(alignment: .leading, spacing: 9) {
                                             Text(letterParts.root)
-                                                .font(.system(size: 21, design: .serif))
+                                                .font(.custom("Iowan Old Style", size: 21))
                                                 .foregroundStyle(Color(red: 0.18, green: 0.17, blue: 0.15))
                                                 .lineSpacing(9)
                                                 .underline(
@@ -3940,8 +4175,8 @@ private struct NativeRewindView: View {
                                                     color: Color.black.opacity(0.65)
                                                 )
                                             Text(letterParts.description)
-                                                .font(.system(size: 13.5, design: .serif))
-                                                .foregroundStyle(Color.black.opacity(0.48))
+                                                .font(.custom("Iowan Old Style", size: 13.5))
+                                                .foregroundStyle(Color(red: 0.54, green: 0.53, blue: 0.50))
                                                 .lineSpacing(8)
                                         }
                                         .frame(maxWidth: 800, alignment: .leading)
@@ -4086,7 +4321,7 @@ private struct NativeRewindDayBar: View {
                         .accessibilityHidden(true)
                 }
                 .padding(.horizontal, 11)
-                .frame(width: min(320, max(210, availableWidth * 0.36)), height: 34)
+                .frame(width: min(320, max(210, (availableWidth + 34) * 0.36)), height: 34)
                 .background(
                     Color(red: 0.965, green: 0.96, blue: 0.945),
                     in: RoundedRectangle(cornerRadius: 9)
@@ -4106,7 +4341,7 @@ private struct NativeRewindDayBar: View {
         }
         .padding(.horizontal, 18)
         .frame(height: 54)
-        .background(.ultraThinMaterial)
+        .background(Color.white.opacity(0.88))
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color.black.opacity(0.08))
@@ -4263,6 +4498,17 @@ private struct NativeFlowLayout: Layout {
 
         for subview in subviews {
             let size = subview.sizeThatFits(.unspecified)
+            if subview[NativeFlowTrailingKey.self] {
+                if lineWidth > 0 && lineWidth + spacing + size.width > availableWidth {
+                    maximumWidth = max(maximumWidth, lineWidth)
+                    totalHeight += lineHeight + spacing
+                    lineHeight = size.height
+                } else {
+                    lineHeight = max(lineHeight, size.height)
+                }
+                lineWidth = availableWidth
+                continue
+            }
             let nextWidth = lineWidth == 0
                 ? size.width
                 : lineWidth + spacing + size.width
@@ -4296,6 +4542,20 @@ private struct NativeFlowLayout: Layout {
 
         for subview in subviews {
             let size = subview.sizeThatFits(.unspecified)
+            if subview[NativeFlowTrailingKey.self] {
+                if x > bounds.minX && x + spacing + size.width > bounds.maxX {
+                    y += lineHeight + spacing
+                    lineHeight = 0
+                }
+                subview.place(
+                    at: CGPoint(x: bounds.maxX - size.width, y: y),
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(size)
+                )
+                x = bounds.maxX
+                lineHeight = max(lineHeight, size.height)
+                continue
+            }
             if x > bounds.minX && x + spacing + size.width > bounds.maxX {
                 x = bounds.minX
                 y += lineHeight + spacing
@@ -4312,6 +4572,10 @@ private struct NativeFlowLayout: Layout {
             lineHeight = max(lineHeight, size.height)
         }
     }
+}
+
+private struct NativeFlowTrailingKey: LayoutValueKey {
+    static let defaultValue = false
 }
 
 private struct NativeRewindFilters: View {
@@ -4792,8 +5056,8 @@ private struct NativeDayModelUpdates: View {
                         .font(.system(size: 10.5))
                         .foregroundStyle(Color.black.opacity(0.34))
                 }
-                .padding(.top, 25)
-                .padding(.bottom, 8)
+                .padding(.top, 29)
+                .padding(.bottom, 11)
                 .overlay(alignment: .top) {
                     Rectangle()
                         .fill(Color.black.opacity(0.13))
@@ -4814,9 +5078,10 @@ private struct NativeDayModelUpdates: View {
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(Color.black.opacity(0.78))
                             Text(update.text)
-                                .font(.system(size: 15.5, design: .serif))
-                                .foregroundStyle(Color.black.opacity(0.66))
+                                .font(.custom("Iowan Old Style", size: 15.5))
+                                .foregroundStyle(Color(red: 0.34, green: 0.33, blue: 0.31))
                                 .lineSpacing(7)
+                                .frame(minHeight: 32, alignment: .topLeading)
                                 .underline(
                                     selectedUpdateID == update.id,
                                     color: Color.black.opacity(0.62)
@@ -5102,6 +5367,7 @@ private struct NativeRewindTelevision: View {
                     .foregroundStyle(Color.black.opacity(0.28))
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
+                    .layoutValue(key: NativeFlowTrailingKey.self, value: true)
             }
             .padding(.top, 14)
         }

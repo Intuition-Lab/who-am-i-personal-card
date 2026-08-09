@@ -105,6 +105,8 @@ test("native app preserves the original V5 interaction surfaces without a WebVie
     "NativeIdentityView",
     "NativeYearHeatmap",
     "NativeFlowLayout",
+    "NativeAppTopBar",
+    "NativeAppTopMenu",
     "NativeRewindFilters",
     "NativeRewindDayBar",
     "NativeMonthCalendar",
@@ -146,6 +148,8 @@ test("native app preserves the original V5 interaction surfaces without a WebVie
     "ROOT · 根",
     "当天没有可用的画面",
     "0 / 0",
+    "Persome · 已连接",
+    "正在记录 · 暂停 1 小时",
     "ROOT · 今天留下的一句",
     "ROOT · 我是谁",
     "← → 巡星",
@@ -162,7 +166,8 @@ test("native app preserves the original V5 interaction surfaces without a WebVie
   assert.match(nativeUI, /state\.rewindDayRequest = nil/);
   assert.match(nativeUI, /nativeMonthName\(referenceDate\)/);
   assert.match(nativeUI, /nativeDayLetterParts/);
-  assert.match(nativeUI, /pinnedViews: \[\.sectionHeaders\]/);
+  assert.match(nativeUI, /LazyVStack\(spacing: 0\)/);
+  assert.match(nativeUI, /NativeFlowTrailingKey/);
   assert.match(nativeUI, /let weekCount = 28/);
   assert.match(nativeUI, /frame\(width: 430, height: 430 \/ 1\.586\)/);
   assert.match(nativeUI, /\(28, 40, 16, 34\)/);
