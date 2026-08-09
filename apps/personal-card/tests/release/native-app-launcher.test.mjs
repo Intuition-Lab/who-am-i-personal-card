@@ -45,6 +45,8 @@ test("production installs a native SwiftUI app with an embedded backend", async 
   assert.match(swiftSource, /NSStatusBar\.system\.statusItem/);
   assert.match(swiftSource, /positionSpotlightPanel/);
   assert.match(swiftSource, /statusButton\.convert/);
+  assert.match(swiftSource, /visibleFrame\.height - verticalMargin \* 2/);
+  assert.match(swiftSource, /window\.setContentSize\(targetSize\)/);
   assert.match(swiftSource, /isMovableByWindowBackground = false/);
   assert.match(swiftSource, /showSearchFromStatusItem/);
   assert.match(swiftSource, /showAskFromStatusItem/);
@@ -82,6 +84,11 @@ test("production installs a native SwiftUI app with an embedded backend", async 
   }
   assert.match(nativeUI, /Bundle\.main\.resourceURL/);
   assert.match(nativeUI, /appendingPathComponent\("AppIcons"/);
+  assert.match(nativeUI, /WHOAMI_VISUAL_QA_ACTIVE/);
+  assert.match(swiftSource, /whoAmIVisualQAActive/);
+  assert.match(nativeUI, /onContinuousHover/);
+  assert.match(nativeUI, /func openRewind\(dayID:/);
+  assert.match(nativeUI, /state\.openRewind\(dayID: item\.dayId\)/);
   assert.match(packageBuilder, /--bootstrap/);
   assert.match(packageBuilder, /Who Am I\.app/);
   assert.match(packageBuilder, /Contents\/Resources\/product/);
@@ -102,9 +109,17 @@ test("native app preserves the original V5 interaction surfaces without a WebVie
     "NativeShareView",
     "NativeIdentityView",
     "NativeYearHeatmap",
+    "NativeFlowLayout",
+    "NativeAppTopBar",
+    "NativeAppTopMenu",
+    "NativeRewindFilters",
+    "NativeRewindDayBar",
     "NativeMonthCalendar",
+    "NativeRewindHighlights",
     "NativeRewindTelevision",
+    "NativeTelevisionKnob",
     "NativeMemorySky",
+    "NativeConstellationTheme",
     "NativeCorrectionToast",
     "NativeConnectorDock",
     "NativeConnectorSwipe",
@@ -128,10 +143,22 @@ test("native app preserves the original V5 interaction surfaces without a WebVie
     'case "klein"',
     'case "graphite"',
     "Search this day",
+    "search memories…",
+    "日历与记忆星图",
     "今天写进 Personal Model",
+    "值得回去的瞬间",
+    "每件事只出现一次 · 点一下回到画面",
+    "FACE · 面",
+    "VOLUME · 体",
+    "ROOT · 根",
+    "当天没有可用的画面",
+    "0 / 0",
+    "Persome · 已连接",
+    "正在记录 · 暂停 1 小时",
     "ROOT · 今天留下的一句",
     "ROOT · 我是谁",
     "← → 巡星",
+    "亮星可点 · ← → 巡星 · 点星座名查看模型推断",
     "SAME MODEL · PRIVATE INSIDE / PUBLIC OUTSIDE",
     "划线分享",
     "打开 Evidence",
@@ -139,6 +166,14 @@ test("native app preserves the original V5 interaction surfaces without a WebVie
     assert.match(nativeUI, new RegExp(detail));
   }
   assert.doesNotMatch(nativeUI, /WKWebView|WebKit/);
+  assert.match(nativeUI, /state\.isMemorySkyOpen[\s\S]*accessibilityHidden/);
+  assert.match(nativeUI, /onExitCommand/);
+  assert.match(nativeUI, /state\.rewindDayRequest = nil/);
+  assert.match(nativeUI, /nativeMonthName\(referenceDate\)/);
+  assert.match(nativeUI, /nativeDayLetterParts/);
+  assert.match(nativeUI, /LazyVStack\(spacing: 0\)/);
+  assert.match(nativeUI, /NativeFlowTrailingKey/);
+  assert.match(nativeUI, /let weekCount = 28/);
   assert.match(nativeUI, /frame\(width: 430, height: 430 \/ 1\.586\)/);
   assert.match(nativeUI, /\(28, 40, 16, 34\)/);
   assert.match(nativeUI, /\(66, 56, 14, 26\)/);

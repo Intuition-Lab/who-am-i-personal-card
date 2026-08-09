@@ -81,7 +81,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(
-            isBootstrapInstaller || whoAmIVisualQAOpaque ? .regular : .accessory
+            isBootstrapInstaller || whoAmIVisualQAActive ? .regular : .accessory
         )
         createMainMenu()
         createWindow(bootstrap: isBootstrapInstaller)
@@ -215,7 +215,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             spotlightPanel.isFloatingPanel = true
             spotlightPanel.level = .floating
-            spotlightPanel.hidesOnDeactivate = !whoAmIVisualQAOpaque
+            spotlightPanel.hidesOnDeactivate = !whoAmIVisualQAActive
             spotlightPanel.collectionBehavior = [
                 .canJoinAllSpaces,
                 .fullScreenAuxiliary,
@@ -396,6 +396,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let visibleFrame = screen.visibleFrame
         let horizontalMargin: CGFloat = 12
         let verticalMargin: CGFloat = 10
+        let targetSize = NSSize(
+            width: min(900, max(760, visibleFrame.width - horizontalMargin * 2)),
+            height: min(840, max(560, visibleFrame.height - verticalMargin * 2))
+        )
+        if window.frame.size != targetSize {
+            window.setContentSize(targetSize)
+        }
         var originX = visibleFrame.maxX - window.frame.width - horizontalMargin
 
         if let statusButton, let statusWindow = statusButton.window {
@@ -408,7 +415,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             max(originX, visibleFrame.minX + horizontalMargin),
             visibleFrame.maxX - window.frame.width - horizontalMargin
         )
-        let originY = visibleFrame.maxY - window.frame.height - verticalMargin
+        let originY = max(
+            visibleFrame.minY + verticalMargin,
+            visibleFrame.maxY - window.frame.height - verticalMargin
+        )
         window.setFrameOrigin(NSPoint(x: originX, y: originY))
     }
 
