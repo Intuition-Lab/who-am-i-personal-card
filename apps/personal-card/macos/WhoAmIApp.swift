@@ -2,8 +2,18 @@ import Cocoa
 import Foundation
 import SwiftUI
 
-private let serverURL = URL(string: "http://127.0.0.1:8772/")!
-private let statusURL = URL(string: "http://127.0.0.1:8772/api/app/health")!
+private let defaultServerURL = URL(string: "http://127.0.0.1:8772/")!
+private let visualQAServerOverride: URL? = {
+    guard whoAmIVisualQAActive,
+          let rawValue = whoAmIVisualQAServerURL,
+          let url = URL(string: rawValue),
+          url.scheme == "http",
+          ["127.0.0.1", "localhost", "::1"].contains(url.host ?? "")
+    else { return nil }
+    return url
+}()
+private let serverURL = visualQAServerOverride ?? defaultServerURL
+private let statusURL = serverURL.appendingPathComponent("api/app/health")
 
 private struct SetupStatus: Decodable {
     let productVersion: String?
@@ -194,8 +204,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         } else {
             let spotlightPanel = NSPanel(
-                contentRect: NSRect(origin: .zero, size: NSSize(width: 900, height: 840)),
-                styleMask: [.borderless, .resizable],
+                contentRect: NSRect(origin: .zero, size: NSSize(width: 1_280, height: 840)),
+                styleMask: [.borderless],
                 backing: .buffered,
                 defer: false
             )
@@ -372,10 +382,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let screen else { return }
 
         let visibleFrame = screen.visibleFrame
-        let horizontalMargin: CGFloat = 12
+        let horizontalMargin: CGFloat = 0
         let verticalMargin: CGFloat = 10
         let targetSize = NSSize(
-            width: min(900, max(760, visibleFrame.width - horizontalMargin * 2)),
+            width: min(1_280, max(760, visibleFrame.width - horizontalMargin * 2)),
             height: min(840, max(560, visibleFrame.height - verticalMargin * 2))
         )
         if window.frame.size != targetSize {
@@ -417,7 +427,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showMemorySkyFromStatusItem(_ sender: Any?) {
-        appState?.isMemorySkyOpen = true
+        appState?.openMemorySky()
         showMainWindow(nil)
     }
 
@@ -541,6 +551,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             let expectedVersion = try bundleString("WhoAmIProductVersion")
             if isBootstrapInstaller {
                 try await installAndOpenNativeApp(expectedVersion: expectedVersion)
+                return
+            }
+            if visualQAServerOverride != nil {
+                loadProduct()
                 return
             }
             let productRoot = try fileURL(fromBundleKey: "WhoAmIProductRoot")
@@ -813,6 +827,43 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self, let window = self.window else { return }
             let state = PersonalModelAppState(baseURL: serverURL)
+            if whoAmIVisualQAActive,
+               let requestedSection = whoAmIVisualQASection,
+               let section = WhoAmISection.allCases.first(where: {
+                   $0.rawValue.caseInsensitiveCompare(requestedSection) == .orderedSame
+               }) {
+                state.selectedSection = section
+            }
+            if whoAmIVisualQAActive,
+               let presentation = whoAmIVisualQAPresentation,
+               presentation == "share" {
+                state.isShareOpen = true
+            }
+            if whoAmIVisualQAActive,
+               let presentation = whoAmIVisualQAPresentation,
+               let prefix = [
+                   "memory-sky-evidence:",
+                   "share-fact-evidence:",
+               ].first(where: { presentation.hasPrefix($0) }) {
+                state.memorySkyEvidenceRequest = String(
+                    presentation.dropFirst(prefix.count)
+                )
+                state.isMemorySkyOpen = true
+            }
+            if whoAmIVisualQAActive,
+               let presentation = whoAmIVisualQAPresentation,
+               let prefix = [
+                   "rewind-day:",
+                   "rewind-tv:",
+                   "rewind-tv-fallback:",
+                   "rewind-root:",
+               ].first(where: {
+                   presentation.hasPrefix($0)
+               }) {
+                let dayID = String(presentation.dropFirst(prefix.count))
+                state.selectedSection = .rewind
+                state.rewindDayRequest = dayID
+            }
             self.appState = state
             let host = NSHostingView(rootView: WhoAmIRootView(state: state))
             host.wantsLayer = true
@@ -823,6 +874,47 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 : .clear
             self.statusMenuModelItem?.title = "Personal Model · 已连接"
             self.showMainWindow(nil)
+            self.scheduleVisualQASnapshotIfNeeded(window: window, state: state)
+        }
+    }
+
+    private func scheduleVisualQASnapshotIfNeeded(
+        window: NSWindow,
+        state: PersonalModelAppState
+    ) {
+        guard whoAmIVisualQAActive,
+              let path = whoAmIVisualQASnapshotPath,
+              path.hasSuffix(".png"),
+              path.hasPrefix("/tmp/") || path.hasPrefix("/private/tmp/")
+        else { return }
+
+        Task { @MainActor [weak self, weak window] in
+            let expectsSetup = whoAmIVisualQAPresentation?.hasPrefix("setup:") == true
+            for _ in 0..<120 {
+                guard self?.isTerminating == false else { return }
+                if state.snapshot != nil || expectsSetup { break }
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+            guard (state.snapshot != nil || expectsSetup),
+                  let window,
+                  let contentView = window.contentView else {
+                return
+            }
+            // Let QA-only navigation and the Rewind push transition settle before
+            // caching the window. This never runs in the shipped interaction path.
+            try? await Task.sleep(nanoseconds: 1_100_000_000)
+            window.displayIfNeeded()
+            contentView.layoutSubtreeIfNeeded()
+            let bounds = contentView.bounds
+            guard bounds.width > 0,
+                  bounds.height > 0,
+                  let representation = contentView.bitmapImageRepForCachingDisplay(in: bounds)
+            else { return }
+            contentView.cacheDisplay(in: bounds, to: representation)
+            guard let png = representation.representation(using: .png, properties: [:]) else {
+                return
+            }
+            try? png.write(to: URL(fileURLWithPath: path), options: .atomic)
         }
     }
 

@@ -47,7 +47,7 @@
     "items": [
       {"id":"l-now-1","kind":"past","title":"社区步行访谈","why":"回到一个改变设计方向的现场","when":"上周","dayId":"2026-08-01"},
       {"id":"l-now-2","kind":"present","title":"整理城市夜间导航原型","why":"接上昨天的田野记录","when":"现在","dayId":"2026-08-07"},
-      {"id":"l-now-3","kind":"future","title":"验证新的触觉提示","why":"让提醒更安静地进入日常","when":"明天","dayId":"2026-08-08"}
+      {"id":"l-now-3","kind":"future","title":"验证新的触觉提示","why":"让提醒更安静地进入日常","when":"明天","dayId":"2026-08-08","app":"Field Notes","metadata":{"provenance":"generated","sourceRefs":["lin-demo:event:2026-08-07:01"],"timeRange":{"start":"2026-08-01T00:00:00.000Z","end":"2026-08-07T08:00:00.000Z"},"generatedAt":"2026-08-07T08:00:00.000Z","method":"fixture continuation-suggestion"}}
     ]
   },
   "time": {

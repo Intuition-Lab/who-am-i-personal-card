@@ -150,6 +150,7 @@
               "why": { "type": "string" },
               "when": { "type": "string" },
               "dayId": { "type": "string" },
+              "app": { "type": "string" },
               "metadata": { "$ref": "#/$defs/contentMetadata" }
             }
           }

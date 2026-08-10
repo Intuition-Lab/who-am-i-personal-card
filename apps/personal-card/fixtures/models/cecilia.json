@@ -46,7 +46,7 @@
     "items": [
       {"id":"c-now-1","kind":"past","title":"Personal Card 的上一版","why":"回到一个差点被忘记的设计判断","when":"昨天","dayId":"2026-08-06"},
       {"id":"c-now-2","kind":"present","title":"继续 Personal Card","why":"从刚才留下的上下文继续","when":"现在","dayId":"2026-08-07"},
-      {"id":"c-now-3","kind":"future","title":"把开发任务交给 Codex","why":"先冻结视觉，再替换数据层","when":"明天","dayId":"2026-08-08"}
+      {"id":"c-now-3","kind":"future","title":"把开发任务交给 Codex","why":"先冻结视觉，再替换数据层","when":"明天","dayId":"2026-08-08","app":"Codex","metadata":{"provenance":"generated","sourceRefs":["cecilia:event:2026-08-07:01"],"timeRange":{"start":"2026-08-01T00:00:00.000Z","end":"2026-08-07T08:00:00.000Z"},"generatedAt":"2026-08-07T08:00:00.000Z","method":"fixture continuation-suggestion"}}
     ]
   },
   "time": {
