@@ -826,7 +826,7 @@ final class PersonalModelAppState: ObservableObject {
                     method: "POST",
                     json: [
                         "modelId": requestedModelID,
-                        "access": "authorized",
+                        "access": requestedModelID == "cecilia" ? "owner" : "authorized",
                     ]
                 )
             } else {
@@ -5118,7 +5118,7 @@ private struct NativeRewindView: View {
                             Text(day.title ?? day.id)
                                 .font(.custom("Iowan Old Style", size: 42))
                                 .tracking(-1.47)
-                                .padding(.top, 6)
+                                .padding(.top, 13)
                             if let portrait = day.portrait?.trimmedNonEmpty {
                                 Text(portrait)
                                     .font(.system(size: 14.5))
@@ -5133,11 +5133,13 @@ private struct NativeRewindView: View {
                                 snapshot: snapshot,
                                 day: day
                             )
-                            .padding(.top, 37)
+                            .padding(.top, 31)
 
                             NativeRewindHighlights(
                                 state: state,
                                 day: day,
+                                frames: visibleFrames,
+                                selectedFrameIndex: selectedFrameIndex,
                                 select: { index, event in
                                     selectedEventIndex = index
                                     selectedFrameIndex = nativeNearestFrameIndex(
@@ -5187,7 +5189,7 @@ private struct NativeRewindView: View {
                                     Button {
                                         isDayRootSelected.toggle()
                                     } label: {
-                                        VStack(alignment: .leading, spacing: 16) {
+                                        VStack(alignment: .leading, spacing: 9) {
                                             Text(letterParts.root)
                                                 .font(.custom("Iowan Old Style", size: 21))
                                                 .foregroundStyle(Color(red: 0.18, green: 0.17, blue: 0.15))
@@ -5205,7 +5207,7 @@ private struct NativeRewindView: View {
                                         .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.plain)
-                                    .padding(.top, 20)
+                                    .padding(.top, 15)
 
                                     if isDayRootSelected {
                                         Button("划线分享 ↗") {
@@ -6383,6 +6385,8 @@ private struct NativeRewindApps: View {
 private struct NativeRewindHighlights: View {
     @ObservedObject var state: PersonalModelAppState
     let day: DaySnapshot
+    let frames: [RewindFrameSnapshot]
+    let selectedFrameIndex: Int
     let select: (Int, EventSnapshot) -> Void
     @State private var hoveredEventID: String?
 
@@ -6403,6 +6407,16 @@ private struct NativeRewindHighlights: View {
         return Array(output.suffix(3))
     }
 
+    private var currentFrameIndex: Int {
+        guard !frames.isEmpty else { return -1 }
+        if selectedFrameIndex < 0 { return frames.count - 1 }
+        return min(selectedFrameIndex, frames.count - 1)
+    }
+
+    private func isSelected(_ event: EventSnapshot) -> Bool {
+        nativeNearestFrameIndex(to: event, in: frames) == currentFrameIndex
+    }
+
     var body: some View {
         if !highlights.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
@@ -6418,6 +6432,7 @@ private struct NativeRewindHighlights: View {
                 .padding(.bottom, 8)
 
                 ForEach(Array(highlights.enumerated()), id: \.element.event.id) { _, highlight in
+                    let selected = isSelected(highlight.event)
                     HStack(alignment: .top, spacing: 13) {
                         Button {
                             select(highlight.index, highlight.event)
@@ -6431,11 +6446,16 @@ private struct NativeRewindHighlights: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(highlight.event.title)
                                         .font(.system(size: 13.5, weight: .medium))
-                                        .foregroundStyle(Color.black.opacity(0.84))
+                                        .foregroundStyle(
+                                            selected
+                                                ? nativeHexColor("#1D1D1F")
+                                                : nativeHexColor("#57544E")
+                                        )
                                     Text(highlight.event.detail?.trimmedNonEmpty ?? "这条记录没有附加描述。")
                                         .font(.system(size: 11.5))
-                                        .foregroundStyle(Color.black.opacity(0.42))
+                                        .foregroundStyle(nativeHexColor("#8A8780"))
                                         .lineLimit(1)
+                                        .frame(height: 20, alignment: .topLeading)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 Text("\(String(format: "%02d", highlight.index + 1)) ↗")
@@ -6453,7 +6473,7 @@ private struct NativeRewindHighlights: View {
                             }
                             .buttonStyle(.plain)
                             .font(.system(size: 10.5))
-                            .foregroundStyle(Color.black.opacity(0.58))
+                            .foregroundStyle(nativeHexColor("#77736C"))
                             .padding(.top, 1)
                         }
                     }
@@ -6534,8 +6554,8 @@ private struct NativeDayModelUpdates: View {
                         .font(.system(size: 10.5))
                         .foregroundStyle(Color.black.opacity(0.34))
                 }
-                .padding(.top, 29)
-                .padding(.bottom, 11)
+                .padding(.top, 25)
+                .padding(.bottom, 8)
                 .overlay(alignment: .top) {
                     Rectangle()
                         .fill(Color.black.opacity(0.13))
@@ -6558,9 +6578,9 @@ private struct NativeDayModelUpdates: View {
                             Text(update.text)
                                 .font(.custom("Iowan Old Style", size: 15.5))
                                 .foregroundStyle(Color(red: 0.34, green: 0.33, blue: 0.31))
-                                .lineSpacing(7)
+                                .lineSpacing(10)
                                 .fixedSize(horizontal: false, vertical: true)
-                                .frame(minHeight: 32, alignment: .topLeading)
+                                .frame(minHeight: 29, alignment: .topLeading)
                                 .underline(
                                     selectedUpdateID == update.id,
                                     color: Color.black.opacity(0.62)
@@ -6649,8 +6669,8 @@ private struct NativeRewindTelevision: View {
     private var appRows: [(name: String, count: Int)] {
         var order: [String] = []
         var counts: [String: Int] = [:]
-        for event in events {
-            let name = event.app?.trimmedNonEmpty ?? "Personal Model"
+        for frame in frames {
+            let name = frame.app.trimmedNonEmpty ?? "Unknown"
             if counts[name] == nil { order.append(name) }
             counts[name, default: 0] += 1
         }
@@ -6749,10 +6769,17 @@ private struct NativeRewindTelevision: View {
                             .foregroundStyle(.white)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 7)
-                            .background(.black.opacity(0.56), in: RoundedRectangle(cornerRadius: 9))
+                            .background {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .fill(.ultraThinMaterial)
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .fill(nativeHexColor("#161618").opacity(0.68))
+                                }
+                            }
                             .overlay(
                                 RoundedRectangle(cornerRadius: 9)
-                                    .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
+                                    .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
                             )
                             Spacer()
                         }
@@ -6769,13 +6796,25 @@ private struct NativeRewindTelevision: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 9)
-                        .background(.black.opacity(0.56), in: RoundedRectangle(cornerRadius: 10))
+                        .background {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(.ultraThinMaterial)
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(nativeHexColor("#161618").opacity(0.68))
+                            }
+                        }
                         .overlay(
                             RoundedRectangle(cornerRadius: 10)
-                                .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
+                                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
                         )
                     }
                     .padding(12)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .stroke(Color.white.opacity(0.07), lineWidth: 0.5)
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: screenHeight)
@@ -6816,11 +6855,11 @@ private struct NativeRewindTelevision: View {
             }
             .background(
                 LinearGradient(
-                    colors: [
-                        Color(red: 0.208, green: 0.208, blue: 0.212),
-                        Color(red: 0.114, green: 0.114, blue: 0.122),
-                        Color(red: 0.078, green: 0.078, blue: 0.086),
-                    ],
+                    gradient: Gradient(stops: [
+                        .init(color: nativeHexColor("#353536"), location: 0),
+                        .init(color: nativeHexColor("#1D1D1F"), location: 0.58),
+                        .init(color: nativeHexColor("#141416"), location: 1),
+                    ]),
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 ),
@@ -6830,9 +6869,9 @@ private struct NativeRewindTelevision: View {
                 RoundedRectangle(cornerRadius: 21)
                     .stroke(Color.black.opacity(0.70), lineWidth: 1)
                 RoundedRectangle(cornerRadius: 21)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 0.7)
+                    .stroke(Color.white.opacity(0.16), lineWidth: 0.5)
             }
-            .shadow(color: .black.opacity(0.32), radius: 22, y: 15)
+            .shadow(color: .black.opacity(0.35), radius: 24, y: 24)
 
             HStack(alignment: .top, spacing: 18) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -6961,7 +7000,7 @@ private struct NativeRewindTelevision: View {
                             .scaleEffect(0.62)
                             .frame(width: 18, height: 18)
                         Text(app.name).lineLimit(1)
-                        Text("\(app.count) \(app.count == 1 ? "memory" : "memories")")
+                        Text("\(app.count) frames")
                             .fontWeight(.medium)
                     }
                     .font(.system(size: 11))
