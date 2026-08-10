@@ -54,9 +54,11 @@ test("native beta does not claim reports or public sharing before they exist", a
   const source = await readFile(nativeUIPath, "utf8");
 
   assert.match(source, /var hasSubstantiveData: Bool/);
-  assert.match(source, /报告尚未产生/);
-  assert.match(source, /已连接，但尚未产生有实质数据的报告/);
-  assert.match(source, /Button\(copied \? "已复制" : "复制卡片"\)/);
+  assert.match(source, /Agent 第一次戴上你的卡并完成工作后，会在这里留下一页。/);
+  assert.doesNotMatch(source, /已连接，但尚未产生有实质数据的报告/);
+  assert.match(source, /return copied \? "已复制" : "复制卡片"/);
+  assert.match(source, /snapshot\.card\?\.isConfirmedPublished == true/);
+  assert.match(source, /NativeSharePill\(label: copyLabel\)/);
   assert.match(source, /isConfirmedPublished == true/);
   assert.doesNotMatch(source, /func shareCard\(/);
 });
