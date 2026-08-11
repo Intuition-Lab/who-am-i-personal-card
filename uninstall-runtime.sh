@@ -211,10 +211,11 @@ if [[ -e "${cached_uninstaller}" || -L "${cached_uninstaller}" ]]; then
   fi
   /usr/bin/install -m 0700 "${cached_uninstaller}" "${verified_uninstaller}"
 else
-  runtime_checkout_create "${temporary_root}/runtime"
-  runtime_checkout_verify "${temporary_root}/runtime"
-  /usr/bin/install -m 0700 \
-    "${temporary_root}/runtime/uninstall.sh" "${verified_uninstaller}"
+  printf '%s\n' \
+    'The verified offline Runtime uninstaller is missing.' \
+    'Reinstall this self-contained Who Am I package, then uninstall again.' \
+    'No Personal Model source repository was contacted.' >&2
+  exit 1
 fi
 verified_digest="$(
   /usr/bin/shasum -a 256 "${verified_uninstaller}" \

@@ -13,7 +13,7 @@ and first-run owner profile.
   Recording permission onboarding;
 - network access while the pinned Runtime and locked dependencies are fetched.
 
-When no Personal Model is present, the first source install is large: it may
+When no Personal Model is present, the first installation is large: it may
 fetch a managed Python plus
 PaddlePaddle, OpenCV, OCR, and model-client dependencies. Two observed Apple
 Silicon dependency preparations took roughly four to seven minutes. Network
@@ -34,26 +34,33 @@ bash install.sh --print-plan
 
 ## Interactive installation
 
-There is no Who Am I GitHub Release while `RELEASE_STATUS=HOLD`. For the
-current candidate, use the exact tested source commit in the README. After a
-reviewed `GO`, download all assets from one immutable GitHub Release and verify
-`SHA256SUMS` before extracting its source bundle.
+There is no approved Who Am I GitHub Release while `RELEASE_STATUS=HOLD`.
+After a reviewed `GO`, download the self-contained DMG and `SHA256SUMS` from
+one immutable GitHub Release, verify the checksum, open the DMG, and
+double-click `Who Am I.app`. The native first-run window opens the verified
+installer and switches to the installed App when initialization finishes. The
+App bundle contains the recovery installer, local Node backend, and pinned
+Personal Model source; the installer does not visit its
+separate GitHub repository.
 
-Use this after entering the verified extracted directory:
+The verified `.tar.gz` contains the same installer and is the command-line
+fallback. Use this after entering its extracted
+`who-am-i-<version>-self-contained-macos` directory:
 
 ```bash
-bash install.sh --interactive
+bash "Who Am I.app/Contents/Resources/product/Install Who Am I.command"
 ```
 
 The installer first checks the fixed local Runtime path. An existing
 owner-controlled standalone Personal Model is connected in place: only Who Am
 I and its private Node runtime are installed, and the Runtime, model data,
 permissions and MCP client configurations are not modified. If no Runtime is
-present, the installer fetches only the full commit in `runtime.lock`, verifies
-its Git tree, critical file digests and package metadata, then invokes the
-upstream source installer.
+present, the installer copies the embedded commit in `runtime.lock`, verifies
+its Git tree, critical file digests and package metadata, then invokes its
+source installer. It fails closed when that embedded Runtime is absent or has
+been changed.
 
-Before invoking upstream installation it writes an owner-only management intent
+Before invoking Runtime installation it writes an owner-only management intent
 for the same immutable source. If permission onboarding or another late step
 fails after the Runtime venv is committed, `uninstall-runtime.sh` can still
 identify and safely remove that incomplete product-managed install.
@@ -64,15 +71,15 @@ downloaded release directory is removed. The product additionally installs:
 
 - versioned Card code and private Node under
   `~/.persome/product-app/<product-version>`;
-- a universal AppKit + WKWebView application at
+- a universal native SwiftUI/AppKit application at
   `~/Applications/Who Am I.app`;
 - owner Profile and Card state under
   `~/Library/Application Support/Who Am I` after first use.
 
-Opening `Who Am I.app` creates an independent macOS window and starts the
-owner-local Card service for that window. It does not open the Card URL in the
-default browser. The existing HTML UI remains an internal implementation asset
-so the approved visual baseline and interactions do not change.
+Opening `Who Am I.app` starts the owner-local backend and shows a transparent,
+Spotlight-style native panel. The App remains in the macOS menu bar at the
+upper-right and can be reopened through Spotlight. It does not render the
+product through HTML or open a Card URL in a browser.
 
 When a ready standalone Personal Model already exists, opening Who Am I
 connects it automatically. A secure `~/.persome/who-am-i/profile.json` identity
@@ -107,14 +114,14 @@ bash "${MANAGEMENT_ROOT}/scripts/verify.sh" --full
 
 ## Optional Codex automatic context
 
-The release archive includes a repo marketplace and the
-`personal-model-context` plugin. The Runtime installer intentionally does not
-change Codex configuration. Install the plugin separately from the same
-immutable Git tag:
+The optional `personal-model-context` plugin is available from the immutable
+product Git tag; it is not installed or bundled by the macOS package. The
+Runtime installer intentionally does not change Codex configuration. Install
+the plugin separately from that same tag:
 
 ```bash
 codex plugin marketplace add \
-  "Intuition-Lab/who-am-i-personal-card@v0.1.0-beta.4"
+  "Intuition-Lab/who-am-i-personal-card@v0.1.0-beta.5"
 codex plugin add personal-model-context@intuition-lab
 ```
 
@@ -154,7 +161,8 @@ without running this path.
 
 ## Reinstall and update
 
-Re-running the installer uses the same immutable Runtime source and preserves
+Re-running the package installer uses the same embedded immutable Runtime
+source and preserves
 the Runtime data root and existing owner secrets through the upstream
 transactional installer. A standalone existing Runtime remains standalone:
 re-running this product installer updates only the versioned Card and private
@@ -172,10 +180,10 @@ source identity.
 
 To move to a newer product release:
 
-1. download or check out the new immutable product tag;
+1. download the new immutable self-contained release;
 2. verify its release checksum;
-3. inspect its `runtime.lock` and release notes;
-4. run `bash update.sh --interactive`;
+3. extract the `.tar.gz` and inspect its `runtime.lock` and release notes;
+4. from the extracted package, run `bash update.sh --interactive`;
 5. restart editors that host a Persome stdio MCP process;
 6. run the installed management bundle's `scripts/verify-product.sh`;
 7. run `scripts/verify.sh --full` after Runtime onboarding is complete.
@@ -183,13 +191,14 @@ To move to a newer product release:
 Never update a beta by changing a prior tag or replacing an asset in place.
 An update requires a logged-in interactive terminal so permission and capture
 health can be proven before commit. Non-interactive update requests fail before
-source download or updater execution, leaving the verified Runtime environment
+Runtime replacement or updater execution, leaving the verified Runtime environment
 and personal data in place.
 
 ## Rollback
 
-Check out the previous qualified product release and run its installer. The
-previous release carries its own reviewed `runtime.lock`.
+Download and verify the previous qualified self-contained release and run its
+installer. The previous release carries its own embedded Runtime and reviewed
+`runtime.lock`.
 
 A product rollback must preserve `~/.persome`. Do not delete the Runtime data
 root to work around a product or dependency regression.

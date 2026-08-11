@@ -13,7 +13,7 @@ direct evidence and the machine-readable decision below is complete. The
 manual **Pilot invitation gate** workflow must then pass against the live
 release. That result authorizes exactly five pilot invitations.
 
-<!-- pilot-decision:v1 status=HOLD wave=5 version=0.1.0-beta.4 tag=v0.1.0-beta.4 commit=TBD owner=TBD approved-at=TBD -->
+<!-- pilot-decision:v1 status=HOLD wave=5 version=0.1.0-beta.5 tag=v0.1.0-beta.5 commit=TBD owner=TBD approved-at=TBD -->
 
 ## Roles and records
 
@@ -160,7 +160,7 @@ Immediately stop new invitations when any of these occurs:
 
 - a P0 or unresolved P1;
 - release asset or checksum mismatch;
-- the installer fetches a Runtime commit different from `runtime.lock`;
+- the installer finds an embedded Runtime commit different from `runtime.lock`;
 - product or Runtime data is deleted or cannot be used after upgrade/rollback;
 - a token, credential or personal context appears in default diagnostics,
   analytics, a public issue or a release artifact;

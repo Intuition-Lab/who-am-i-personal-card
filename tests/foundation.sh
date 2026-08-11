@@ -498,6 +498,80 @@ test_runtime_checkout_retries_transient_fetch() {
   [[ "${fetch_calls}" -eq 2 ]]
 }
 
+test_bundled_runtime_checkout_is_copied_and_verified() {
+  local source_checkout="${TEST_CASES}/bundled-runtime-source"
+  local destination="${TEST_CASES}/bundled-runtime-copy"
+  local verify_calls=0
+
+  mkdir -p "${source_checkout}/.git"
+  printf 'runtime payload\n' > "${source_checkout}/payload.txt"
+  runtime_checkout_verify() {
+    local checkout="$1"
+    verify_calls=$((verify_calls + 1))
+    [[ "${checkout}" == "${destination}" ]]
+    [[ -d "${checkout}/.git" ]]
+    grep -Fq 'runtime payload' "${checkout}/payload.txt"
+  }
+
+  runtime_checkout_copy_bundled "${source_checkout}" "${destination}"
+  [[ "${verify_calls}" -eq 1 ]]
+  [[ -f "${destination}/payload.txt" ]]
+}
+
+test_bundled_runtime_checkout_rejects_symlinks() {
+  local source_checkout="${TEST_CASES}/bundled-runtime-symlink"
+  local destination="${TEST_CASES}/bundled-runtime-symlink-copy"
+
+  mkdir -p "${source_checkout}/.git"
+  printf 'payload\n' > "${source_checkout}/payload.txt"
+  ln -s payload.txt "${source_checkout}/linked-payload.txt"
+
+  assert_rejected_contains "contains a symbolic link" \
+    runtime_checkout_copy_bundled "${source_checkout}" "${destination}"
+  [[ ! -e "${destination}" ]]
+}
+
+test_product_installer_never_fetches_runtime_source() {
+  local installer="${PRODUCT_ROOT}/install.sh"
+  local uninstaller="${PRODUCT_ROOT}/uninstall-runtime.sh"
+
+  grep -Fq 'prepare_bundled_runtime_checkout' "${installer}"
+  grep -Fq 'never access the Personal Model source repository' "${installer}"
+  if grep -Eq '^[[:space:]]*runtime_checkout_create([[:space:]]|$)' \
+    "${installer}"; then
+    printf 'Product installer still creates a network Runtime checkout.\n'
+    return 1
+  fi
+  if grep -Eq '^[[:space:]]*runtime_checkout_create([[:space:]]|$)' \
+    "${uninstaller}"; then
+    printf 'Product uninstaller still creates a network Runtime checkout.\n'
+    return 1
+  fi
+}
+
+test_personal_card_replacement_is_transactional() {
+  local installer="${PRODUCT_ROOT}/install.sh"
+
+  grep -Fq 'personal_card_transaction_rollback()' "${installer}"
+  grep -Fq 'personal_card_transaction_commit()' "${installer}"
+  grep -Fq 'PERSONAL_CARD_TRANSACTION_ACTIVE=1' "${installer}"
+  grep -Fq 'after-card-before-verification' "${installer}"
+  [[ "$(grep -Fc 'personal_card_transaction_commit' "${installer}")" -eq 4 ]]
+  [[ "$(grep -Fc 'installer_test_failpoint "after-card-before-verification"' \
+    "${installer}")" -eq 3 ]]
+  awk '
+    /install_personal_card$/ { installed++ }
+    /verify-product\.sh"$/ { verified++ }
+    /personal_card_transaction_commit$/ {
+      if (installed < 1 || verified < 1) exit 1
+      committed++
+      installed=0
+      verified=0
+    }
+    END { if (committed != 3) exit 1 }
+  ' "${installer}"
+}
+
 test_receipt_round_trip() {
   local install_home="${TEST_HOME}/receipt-round-trip"
   local receipt="${install_home}/product-runtime.lock"
@@ -2193,6 +2267,80 @@ test_context_hook_rejects_oversized_prompt() {
   [[ ! -e "${install_home}/context-hook-calls.log" ]]
 }
 
+test_apple_release_entitlements_are_minimal() {
+  local entitlements="${PRODUCT_ROOT}/apps/personal-card/macos/WhoAmI.entitlements"
+
+  [[ -f "${entitlements}" && ! -L "${entitlements}" ]]
+  grep -Fq '<dict/>' "${entitlements}"
+  if grep -Fq 'com.apple.security.' "${entitlements}"; then
+    printf '%s\n' 'The release App unexpectedly requests an Apple entitlement.'
+    return 1
+  fi
+}
+
+test_apple_release_signing_fails_closed_without_identity() {
+  assert_rejected_contains \
+    'Release signing requires a Developer ID Application identity.' \
+    bash "${PRODUCT_ROOT}/scripts/build-self-contained-package.sh" \
+      --output-directory "${TEST_CASES}/missing-apple-identity" \
+      --release-signing
+}
+
+test_native_builder_rejects_incomplete_developer_id_configuration() {
+  assert_rejected_contains \
+    'Team ID must be exactly 10 uppercase letters or digits.' \
+    bash "${PRODUCT_ROOT}/apps/personal-card/macos/build-native-launcher.sh" \
+      --bootstrap \
+      --product-version "$(tr -d '[:space:]' < "${PRODUCT_ROOT}/VERSION")" \
+      --output-directory "${TEST_CASES}/native-developer-id-missing-team" \
+      --sign-identity 'Developer ID Application: Example (ABCDEFGHIJ)'
+}
+
+test_notarized_release_wrapper_requires_environment_secrets() {
+  (
+    unset \
+      WHOAMI_APPLE_DEVELOPER_ID_P12_BASE64 \
+      WHOAMI_APPLE_DEVELOPER_ID_P12_PASSWORD \
+      WHOAMI_APPLE_SIGNING_KEYCHAIN_PASSWORD \
+      WHOAMI_APPLE_SIGN_IDENTITY \
+      WHOAMI_APPLE_TEAM_ID \
+      WHOAMI_APPLE_NOTARY_API_KEY_BASE64 \
+      WHOAMI_APPLE_NOTARY_KEY_ID \
+      WHOAMI_APPLE_NOTARY_ISSUER_ID
+    assert_rejected_contains \
+      'Required Apple release environment is missing' \
+      bash "${PRODUCT_ROOT}/scripts/build-notarized-release-assets.sh"
+  )
+}
+
+test_release_workflow_requires_signing_and_notarization() {
+  local workflow="${PRODUCT_ROOT}/.github/workflows/release.yml"
+  local notary_script="${PRODUCT_ROOT}/scripts/notarize-macos-release.sh"
+
+  grep -Fq 'environment: github-release' "${workflow}"
+  grep -Fq 'build-notarized-release-assets.sh' "${workflow}"
+  grep -Fq 'secrets.APPLE_DEVELOPER_ID_P12_BASE64' "${workflow}"
+  grep -Fq 'secrets.APPLE_NOTARY_API_KEY_BASE64' "${workflow}"
+  grep -Fq 'stapler validate' "${workflow}"
+  grep -Fq -- '--keychain-profile' "${notary_script}"
+  if grep -Eq -- '--apple-id|--password' "${notary_script}"; then
+    printf '%s\n' \
+      'The notarization script accepts raw Apple account credentials.'
+    return 1
+  fi
+}
+
+run_case "Apple release entitlements do not expand product privileges" \
+  test_apple_release_entitlements_are_minimal
+run_case "Apple release signing fails closed without an identity" \
+  test_apple_release_signing_fails_closed_without_identity
+run_case "native Developer ID builds require an explicit Team ID" \
+  test_native_builder_rejects_incomplete_developer_id_configuration
+run_case "notarized release wrapper requires every environment secret" \
+  test_notarized_release_wrapper_requires_environment_secrets
+run_case "release workflow requires signing and notarization" \
+  test_release_workflow_requires_signing_and_notarization
+
 run_case "valid Runtime lock loads" test_valid_lock
 run_case "unknown Runtime lock key is rejected" test_unknown_lock_key
 run_case "duplicate Runtime lock key is rejected" test_duplicate_lock_key
@@ -2243,6 +2391,14 @@ run_case "unsafe temporary prefix is rejected" \
   test_unsafe_temporary_prefix_rejected
 run_case "pinned Runtime checkout retries a transient fetch failure" \
   test_runtime_checkout_retries_transient_fetch
+run_case "bundled Runtime checkout is copied and verified" \
+  test_bundled_runtime_checkout_is_copied_and_verified
+run_case "bundled Runtime checkout rejects symbolic links" \
+  test_bundled_runtime_checkout_rejects_symlinks
+run_case "product installer never fetches the Runtime source repository" \
+  test_product_installer_never_fetches_runtime_source
+run_case "Personal Card replacement rolls back until verification commits" \
+  test_personal_card_replacement_is_transactional
 
 run_case "Runtime receipt matches the pinned lock" test_receipt_round_trip
 run_case "tampered Runtime receipt is rejected" test_tampered_receipt_rejected

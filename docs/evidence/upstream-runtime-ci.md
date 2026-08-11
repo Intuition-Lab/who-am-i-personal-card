@@ -53,10 +53,10 @@ The separate intent run forced failure after the upstream venv commit but
 before either product receipt, then removed that real partial install using
 only the stable offline management bundle while preserving product data.
 
-The same full lifecycle also passed after building the exact four release
-assets with `scripts/build-release-assets.sh`, verifying `SHA256SUMS`,
-extracting the generated source archive into a path containing spaces, and
-running the installer from that extracted archive. This is local
-Apple-Silicon evidence for the release artifact and checkout-path boundary. It
-validates the product installer path but does not substitute for the upstream
-Apple Silicon test suite or a clean-machine permission test.
+The same full lifecycle also passed after building the exact five
+self-contained release assets with `scripts/build-release-assets.sh`,
+verifying `SHA256SUMS`, extracting the generated package into a path containing
+spaces, and running its installer. This is local Apple-Silicon evidence for
+the release artifact and package-path boundary. It validates the product
+installer path but does not substitute for the upstream Apple Silicon test
+suite or a clean-machine permission test.

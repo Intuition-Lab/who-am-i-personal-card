@@ -7,4 +7,5 @@ paths = [
   '''^work/''',
   '''^outputs/''',
   '''^dist/''',
+  '''^website/(?:\.next|\.vinext|\.wrangler|dist|node_modules)/''',
 ]

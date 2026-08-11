@@ -5,7 +5,23 @@ PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH
 unset CDPATH
 
-PRODUCT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TEST_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PRODUCT_ROOT="${WHOAMI_SMOKE_PRODUCT_ROOT:-${TEST_ROOT}}"
+case "${PRODUCT_ROOT}" in
+  /*) ;;
+  *)
+    printf 'Smoke-test product root must be an absolute path.\n' >&2
+    exit 2
+    ;;
+esac
+if [[ ! -d "${PRODUCT_ROOT}" || -L "${PRODUCT_ROOT}" \
+  || ! -f "${PRODUCT_ROOT}/runtime.lock" \
+  || ! -f "${PRODUCT_ROOT}/install.sh" ]]; then
+  printf 'Smoke-test product root is missing or unsafe: %s\n' \
+    "${PRODUCT_ROOT}" >&2
+  exit 2
+fi
+PRODUCT_ROOT="$(cd "${PRODUCT_ROOT}" && pwd -P)"
 
 # shellcheck source=scripts/lib/runtime-lock.sh
 source "${PRODUCT_ROOT}/scripts/lib/runtime-lock.sh"

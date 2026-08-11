@@ -12,10 +12,15 @@ import personalModelGrantSchema from "./personal-model-grant.schema.json" with {
 import personalModelEvidenceSchema from "./personal-model-evidence.schema.json" with {
   type: "json",
 };
+import personalModelCorrectionSchema from "./personal-model-correction.schema.json" with {
+  type: "json",
+};
 
 export const PERSONAL_MODEL_CARD_SCHEMA_ID = personalModelCardSchema.$id;
 export const PERSONAL_MODEL_GRANT_SCHEMA_ID = personalModelGrantSchema.$id;
 export const PERSONAL_MODEL_EVIDENCE_SCHEMA_ID = personalModelEvidenceSchema.$id;
+export const PERSONAL_MODEL_CORRECTION_SCHEMA_ID =
+  personalModelCorrectionSchema.$id;
 
 const ajv = new Ajv2020({
   allErrors: true,
@@ -28,6 +33,7 @@ const validateSchema = ajv.compile(personalModelCardSchema);
 const validatePublicSchema = ajv.compile(publicPersonalModelCardSchema);
 const validateGrantSchema = ajv.compile(personalModelGrantSchema);
 const validateEvidenceSchema = ajv.compile(personalModelEvidenceSchema);
+const validateCorrectionSchema = ajv.compile(personalModelCorrectionSchema);
 const validatedFullSnapshots = new WeakSet();
 
 export class PersonalModelCardValidationError extends TypeError {
@@ -68,6 +74,34 @@ function evidenceOwnershipKeys(snapshot) {
   return new Set([snapshot.model.id]);
 }
 
+function metadataSourceReferences(value, path = "") {
+  const references = [];
+  if (value === null || typeof value !== "object") return references;
+  if (Array.isArray(value)) {
+    value.forEach((child, index) => {
+      references.push(
+        ...metadataSourceReferences(child, `${path}/${index}`),
+      );
+    });
+    return references;
+  }
+
+  if (Array.isArray(value.metadata?.sourceRefs)) {
+    value.metadata.sourceRefs.forEach((reference, index) => {
+      references.push({
+        path: `${path}/metadata/sourceRefs/${index}`,
+        value: reference,
+      });
+    });
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (key !== "metadata") {
+      references.push(...metadataSourceReferences(child, `${path}/${key}`));
+    }
+  }
+  return references;
+}
+
 function evidenceReferences(snapshot) {
   const references = [];
 
@@ -101,6 +135,8 @@ function evidenceReferences(snapshot) {
       });
     }
   }
+
+  references.push(...metadataSourceReferences(snapshot));
 
   return references;
 }
@@ -163,6 +199,96 @@ function deepFreeze(value) {
   return Object.freeze(value);
 }
 
+function cloneWithoutMetadataSourceRefs(value) {
+  const clone = structuredClone(value);
+
+  function strip(current) {
+    if (current === null || typeof current !== "object") return;
+    if (
+      !Array.isArray(current) &&
+      current.metadata &&
+      typeof current.metadata === "object"
+    ) {
+      delete current.metadata.sourceRefs;
+      if (Object.keys(current.metadata).length === 0) {
+        delete current.metadata;
+      }
+    }
+    for (const child of Object.values(current)) strip(child);
+  }
+
+  strip(clone);
+  return clone;
+}
+
+function legacyEvidenceClaim(content) {
+  if (typeof content === "string" && content.trim()) return content.trim();
+  if (content === null || typeof content !== "object") return null;
+
+  for (const candidate of [
+    content.face?.text,
+    content.event?.detail,
+    content.report?.summary,
+    content.detail,
+    content.text,
+    content.title,
+  ]) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return null;
+}
+
+function normalizeLegacyEvidence(evidence) {
+  if (
+    Object.hasOwn(evidence, "source") ||
+    Object.hasOwn(evidence, "supports") ||
+    Object.hasOwn(evidence, "availability")
+  ) {
+    return evidence;
+  }
+
+  const claim = legacyEvidenceClaim(evidence.content);
+  return {
+    ...evidence,
+    source: {
+      type: "derived-summary",
+      originalTime: null,
+      application: null,
+      title:
+        typeof evidence.content?.title === "string"
+          ? evidence.content.title
+          : null,
+    },
+    supports: claim
+      ? [{ claim, relationship: "indirect" }]
+      : [],
+    availability: {
+      status: "unavailable",
+      reason: "original-source-unavailable",
+    },
+  };
+}
+
+function normalizeLegacyCorrection(correction) {
+  if (Object.hasOwn(correction, "status")) return correction;
+  return {
+    modelId: correction.modelId,
+    status: "accepted",
+    receipt:
+      typeof correction.receipt === "string" ? correction.receipt : null,
+    affected: [],
+    verification: {
+      status: "unverified",
+      refreshed: false,
+      oldConclusionDeprioritized: false,
+      previousUpdatedAt: null,
+      updatedAt: null,
+    },
+  };
+}
+
 /**
  * The single ingress from unknown Provider data into UI-safe Snapshot data.
  * It returns a detached, recursively frozen value or throws.
@@ -195,6 +321,17 @@ export function parsePublicPersonalModelCardSnapshot(input) {
     );
   }
 
+  const references = metadataSourceReferences(snapshot);
+  if (references.length > 0) {
+    throw new PersonalModelCardValidationError(
+      references.map(({ path }) => ({
+        path,
+        keyword: "evidenceScope",
+        message: "public projections cannot include Evidence references",
+      })),
+    );
+  }
+
   return deepFreeze(snapshot);
 }
 
@@ -218,8 +355,8 @@ export function projectPublicPersonalModelCardSnapshot(snapshot) {
       scopes: ["card:read", "identity:read"],
       expiresAt: null,
     },
-    card: snapshot.card,
-    identity: snapshot.identity,
+    card: cloneWithoutMetadataSourceRefs(snapshot.card),
+    identity: cloneWithoutMetadataSourceRefs(snapshot.identity),
   });
 }
 
@@ -236,7 +373,7 @@ export function parsePersonalModelGrantClaims(input) {
 }
 
 export function parsePersonalModelEvidenceResponse(input) {
-  const evidence = cloneProviderPayload(input);
+  const evidence = normalizeLegacyEvidence(cloneProviderPayload(input));
 
   if (!validateEvidenceSchema(evidence)) {
     throw new PersonalModelCardValidationError(
@@ -254,5 +391,63 @@ export function parsePersonalModelEvidenceResponse(input) {
     ]);
   }
 
+  if (
+    ["persome-memory", "persome-activity"].includes(evidence.source.type) &&
+    (
+      evidence.availability.status !== "available" ||
+      evidence.source.originalTime === null ||
+      evidence.supports.length === 0
+    )
+  ) {
+    throw new PersonalModelCardValidationError([
+      {
+        path: "/source",
+        keyword: "originalSource",
+        message:
+          "original Persome sources must be available, timestamped, and support at least one claim",
+      },
+    ]);
+  }
+
+  if (
+    evidence.source.type === "derived-summary" &&
+    evidence.supports.some(({ relationship }) => relationship !== "indirect")
+  ) {
+    throw new PersonalModelCardValidationError([
+      {
+        path: "/supports",
+        keyword: "derivedSupport",
+        message: "derived summaries may only provide indirect support",
+      },
+    ]);
+  }
+
   return deepFreeze(evidence);
+}
+
+export function parsePersonalModelCorrectionResponse(input) {
+  const correction = normalizeLegacyCorrection(cloneProviderPayload(input));
+
+  if (!validateCorrectionSchema(correction)) {
+    throw new PersonalModelCardValidationError(
+      schemaIssues(validateCorrectionSchema.errors),
+    );
+  }
+
+  for (const [index, affected] of correction.affected.entries()) {
+    if (
+      affected.reference !== undefined &&
+      !affected.reference.startsWith(`${correction.modelId}:`)
+    ) {
+      throw new PersonalModelCardValidationError([
+        {
+          path: `/affected/${index}/reference`,
+          keyword: "modelOwnership",
+          message: `must belong to model "${correction.modelId}"`,
+        },
+      ]);
+    }
+  }
+
+  return deepFreeze(correction);
 }

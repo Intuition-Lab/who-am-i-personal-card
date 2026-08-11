@@ -10,9 +10,9 @@ function argument(name, fallback = "") {
 }
 
 const AGENT = argument("--agent", process.env.WHOAMI_AGENT || "agent").slice(0, 40);
-const MODEL_ID = argument("--model", "cecilia");
-const CONNECTOR_SESSION_ID = argument("--connector-session", "cs_local_legacy");
-const GRANT_ID = argument("--grant", "owner_cecilia_local");
+const MODEL_ID = argument("--model");
+const CONNECTOR_SESSION_ID = argument("--connector-session");
+const GRANT_ID = argument("--grant");
 const RUNTIME_DATA_ROOT = argument(
   "--runtime-root",
   resolve(process.env.HOME || "", "Library/Application Support/Who Am I/runtime"),
@@ -49,7 +49,11 @@ if (!existsSync(PERSOME)) {
 
 const child = spawn(PERSOME, ["mcp"], {
   stdio: ["pipe", "pipe", "pipe"],
-  env: { ...process.env, PYTHONUNBUFFERED: "1" },
+  env: {
+    ...process.env,
+    PERSOME_ROOT,
+    PYTHONUNBUFFERED: "1",
+  },
 });
 const pending = new Map();
 let requestBuffer = "";
@@ -158,8 +162,11 @@ function describeResult(tool, result) {
 }
 
 function evidenceReceipt(value) {
-  const text = JSON.stringify(value || {});
-  const receipt = text.match(/⟨([^⟩]{4,160})⟩/)?.[1]
+  const parsed = parseResultData(value);
+  const directReceipt = parsed?.receipt || parsed?.entry_id;
+  const text = JSON.stringify(parsed || value || {});
+  const receipt = directReceipt
+    || text.match(/⟨([^⟩]{4,160})⟩/)?.[1]
     || text.match(/"(?:entry_id|receipt)"\s*:\s*"([^"]{4,160})"/i)?.[1]
     || text.match(/\b(?:face|pattern|point|line|capture|event|entry)[_-](?=[A-Za-z0-9_.:-]*\d)[A-Za-z0-9_.:-]{3,120}\b/i)?.[0];
   return receipt ? cleanText(receipt, 150) : "";
@@ -185,6 +192,9 @@ function stableEventHash(record) {
     summary: record.summary,
     occurredAt: record.occurredAt,
     durationMs: record.durationMs,
+    details: record.details,
+    interpretation: record.interpretation,
+    status: record.status,
   })).digest("hex");
 }
 
@@ -214,6 +224,9 @@ async function record(request, response) {
     summary: request.summary,
     occurredAt: endedAt.toISOString(),
     durationMs: Math.max(0, Date.now() - request.startedAt),
+    details: description.details,
+    interpretation: description.interpretation || null,
+    status: response?.error ? "error" : "ok",
   };
   const event = {
     eventId: stableEventHash(core),
@@ -224,9 +237,6 @@ async function record(request, response) {
     agent: AGENT,
     evidenceId: receipt,
     receipt,
-    status: response?.error ? "error" : "ok",
-    details: description.details,
-    interpretation: description.interpretation,
   };
   await mkdir(dirname(LOG_FILE), { recursive: true });
   await appendFile(LOG_FILE, `${JSON.stringify(event)}\n`, "utf8");

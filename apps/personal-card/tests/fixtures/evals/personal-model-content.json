@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "description": "Synthetic, deterministic Personal Model beta content-quality scenarios. No real personal data.",
+  "models": {
+    "atlas": {
+      "memories": [
+        {
+          "id": "atlas-launch-plan",
+          "topic": "launch",
+          "keywords": ["launch", "beta", "schedule"],
+          "text": "The synthetic beta launch is scheduled for Tuesday after the release gate passes.",
+          "evidenceRef": "atlas:memory:launch-plan"
+        },
+        {
+          "id": "atlas-launch-risk",
+          "topic": "launch",
+          "keywords": ["launch", "beta", "risk"],
+          "text": "The synthetic launch risk is an incomplete first-run permission check.",
+          "evidenceRef": "atlas:memory:launch-risk"
+        },
+        {
+          "id": "atlas-launch-owner",
+          "topic": "launch",
+          "keywords": ["launch", "beta", "owner"],
+          "text": "The release owner for the synthetic beta is Project Atlas Team.",
+          "evidenceRef": "atlas:memory:launch-owner"
+        },
+        {
+          "id": "atlas-storage-decision",
+          "topic": "privacy",
+          "keywords": ["privacy", "storage", "decision", "local"],
+          "text": "Project Atlas chose owner-local storage to keep synthetic notes off shared infrastructure.",
+          "evidenceRef": "atlas:memory:storage-decision"
+        },
+        {
+          "id": "atlas-writing-preference",
+          "topic": "preference",
+          "keywords": ["preference", "writing", "decision", "concise", "evidence"],
+          "text": "Project Atlas prefers concise, evidence-backed decision notes.",
+          "evidenceRef": "atlas:memory:writing-preference"
+        },
+        {
+          "id": "atlas-review-time",
+          "topic": "review",
+          "keywords": ["review", "meeting", "time"],
+          "text": "The synthetic review meeting is Wednesday at 14:00.",
+          "evidenceRef": "atlas:memory:review-time"
+        }
+      ],
+      "rewind": [
+        {
+          "id": "atlas-event-morning",
+          "startedAt": "2026-08-07T09:00:00.000Z",
+          "endedAt": "2026-08-07T09:40:00.000Z",
+          "summary": "Tested a synthetic navigation prototype.",
+          "evidenceRef": "atlas:event:morning"
+        },
+        {
+          "id": "atlas-event-afternoon",
+          "startedAt": "2026-08-07T14:00:00.000Z",
+          "endedAt": "2026-08-07T14:30:00.000Z",
+          "summary": "Reviewed the synthetic beta release gate.",
+          "evidenceRef": "atlas:event:afternoon"
+        }
+      ]
+    },
+    "boreal": {
+      "memories": [
+        {
+          "id": "boreal-budget",
+          "topic": "budget",
+          "keywords": ["budget", "finance"],
+          "text": "BOREAL_ONLY_71D9 has a synthetic budget of 42 credits.",
+          "evidenceRef": "boreal:memory:budget"
+        },
+        {
+          "id": "boreal-launch",
+          "topic": "launch",
+          "keywords": ["launch", "beta", "schedule"],
+          "text": "BOREAL_ONLY_71D9 launches on Friday.",
+          "evidenceRef": "boreal:memory:launch"
+        }
+      ],
+      "rewind": [
+        {
+          "id": "boreal-event-private",
+          "startedAt": "2026-08-07T11:00:00.000Z",
+          "endedAt": "2026-08-07T11:15:00.000Z",
+          "summary": "BOREAL_ONLY_71D9 reviewed its synthetic budget.",
+          "evidenceRef": "boreal:event:private"
+        }
+      ]
+    }
+  },
+  "scenarios": [
+    { "id": "search-01", "category": "complete_search", "operation": "search", "modelId": "atlas", "query": "all beta launch memories", "expectedMemoryIds": ["atlas-launch-plan", "atlas-launch-risk", "atlas-launch-owner"] },
+    { "id": "search-02", "category": "complete_search", "operation": "search", "modelId": "atlas", "query": "完整的 beta 发布记忆", "expectedMemoryIds": ["atlas-launch-plan", "atlas-launch-risk", "atlas-launch-owner"] },
+    { "id": "search-03", "category": "complete_search", "operation": "search", "modelId": "atlas", "query": "launch risk", "expectedMemoryIds": ["atlas-launch-risk"] },
+    { "id": "search-04", "category": "complete_search", "operation": "search", "modelId": "atlas", "query": "release owner", "expectedMemoryIds": ["atlas-launch-owner"] },
+    { "id": "search-05", "category": "complete_search", "operation": "search", "modelId": "atlas", "query": "local storage decision", "expectedMemoryIds": ["atlas-storage-decision"] },
+
+    { "id": "phrase-01", "category": "paraphrase", "operation": "search", "modelId": "atlas", "query": "when do we ship the test release", "expectedMemoryIds": ["atlas-launch-plan"] },
+    { "id": "phrase-02", "category": "paraphrase", "operation": "search", "modelId": "atlas", "query": "内测什么时候上线", "expectedMemoryIds": ["atlas-launch-plan"] },
+    { "id": "phrase-03", "category": "paraphrase", "operation": "search", "modelId": "atlas", "query": "why keep notes on this computer", "expectedMemoryIds": ["atlas-storage-decision"] },
+    { "id": "phrase-04", "category": "paraphrase", "operation": "search", "modelId": "atlas", "query": "how should decision docs be written", "expectedMemoryIds": ["atlas-writing-preference"] },
+    { "id": "phrase-05", "category": "paraphrase", "operation": "search", "modelId": "atlas", "query": "who owns the rollout", "expectedMemoryIds": ["atlas-launch-owner"] },
+
+    { "id": "refuse-01", "category": "unsupported_refusal", "operation": "ask", "modelId": "atlas", "query": "what is my passport number", "expectRefusal": true, "forbiddenFragments": ["passport is", "123456"] },
+    { "id": "refuse-02", "category": "unsupported_refusal", "operation": "ask", "modelId": "atlas", "query": "name my favorite restaurant", "expectRefusal": true, "forbiddenFragments": ["favorite restaurant is"] },
+    { "id": "refuse-03", "category": "unsupported_refusal", "operation": "ask", "modelId": "atlas", "query": "what happened at 18:00 on August 7", "expectRefusal": true, "forbiddenFragments": ["at 18:00 you"] },
+    { "id": "refuse-04", "category": "unsupported_refusal", "operation": "ask", "modelId": "atlas", "query": "tell me an unrecorded medical diagnosis", "expectRefusal": true, "forbiddenFragments": ["diagnosis is"] },
+
+    { "id": "evidence-01", "category": "evidence_alignment", "operation": "ask", "modelId": "atlas", "query": "launch risk", "expectedEvidenceRefs": ["atlas:memory:launch-risk"], "expectedTextFragments": ["incomplete first-run permission check"] },
+    { "id": "evidence-02", "category": "evidence_alignment", "operation": "ask", "modelId": "atlas", "query": "local storage decision", "expectedEvidenceRefs": ["atlas:memory:storage-decision"], "expectedTextFragments": ["owner-local storage"] },
+    { "id": "evidence-03", "category": "evidence_alignment", "operation": "evidence", "modelId": "atlas", "reference": "atlas:memory:writing-preference", "expectedTextFragments": ["concise, evidence-backed"] },
+    { "id": "evidence-04", "category": "evidence_alignment", "operation": "evidence", "modelId": "atlas", "reference": "boreal:memory:budget", "expectErrorCode": "EVIDENCE_MODEL_MISMATCH" },
+
+    { "id": "correct-01", "category": "correct_updates", "operation": "correct", "modelId": "atlas", "memoryId": "atlas-review-time", "replacementText": "The synthetic review meeting is Thursday at 15:00.", "queryAfter": "review meeting time", "expectedTextFragments": ["Thursday at 15:00"], "forbiddenFragments": ["Wednesday at 14:00"] },
+    { "id": "correct-02", "category": "correct_updates", "operation": "correct", "modelId": "atlas", "memoryId": "atlas-writing-preference", "replacementText": "Project Atlas prefers a one-line decision followed by linked Evidence.", "queryAfter": "decision writing preference", "expectedTextFragments": ["one-line decision", "linked Evidence"], "forbiddenFragments": ["concise, evidence-backed"] },
+    { "id": "correct-03", "category": "correct_updates", "operation": "correct", "modelId": "atlas", "memoryId": "atlas-launch-plan", "replacementText": "The synthetic beta launch is scheduled for Wednesday after the release gate passes.", "queryAfter": "beta launch schedule", "expectedTextFragments": ["scheduled for Wednesday"], "forbiddenFragments": ["scheduled for Tuesday"] },
+
+    { "id": "rewind-01", "category": "rewind_grounding", "operation": "rewind", "modelId": "atlas", "from": "2026-08-07T08:00:00.000Z", "to": "2026-08-07T10:00:00.000Z", "expectedEventIds": ["atlas-event-morning"] },
+    { "id": "rewind-02", "category": "rewind_grounding", "operation": "rewind", "modelId": "atlas", "from": "2026-08-07T13:00:00.000Z", "to": "2026-08-07T15:00:00.000Z", "expectedEventIds": ["atlas-event-afternoon"] },
+    { "id": "rewind-03", "category": "rewind_grounding", "operation": "rewind", "modelId": "atlas", "from": "2026-08-07T17:00:00.000Z", "to": "2026-08-07T19:00:00.000Z", "expectedEventIds": [], "forbiddenFragments": ["dinner", "commute", "meeting"] },
+
+    { "id": "isolation-01", "category": "cross_model_isolation", "operation": "search", "modelId": "atlas", "query": "budget finance", "expectedMemoryIds": [], "forbiddenFragments": ["BOREAL_ONLY_71D9", "42 credits"] },
+    { "id": "isolation-02", "category": "cross_model_isolation", "operation": "ask", "modelId": "atlas", "query": "all beta launch memories", "forbiddenFragments": ["BOREAL_ONLY_71D9", "Friday", "boreal:"] },
+    { "id": "isolation-03", "category": "cross_model_isolation", "operation": "rewind", "modelId": "atlas", "from": "2026-08-07T10:30:00.000Z", "to": "2026-08-07T11:30:00.000Z", "expectedEventIds": [], "forbiddenFragments": ["BOREAL_ONLY_71D9", "boreal:"] },
+    { "id": "isolation-04", "category": "cross_model_isolation", "operation": "ask", "modelId": "boreal", "query": "budget finance", "expectedEvidenceRefs": ["boreal:memory:budget"], "forbiddenFragments": ["atlas:", "Project Atlas"] }
+  ]
+}
