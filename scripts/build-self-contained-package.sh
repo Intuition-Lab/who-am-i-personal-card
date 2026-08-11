@@ -239,6 +239,7 @@ for package_directory in \
   apps/personal-card/src/auth \
   apps/personal-card/src/client \
   apps/personal-card/src/connectors \
+  apps/personal-card/src/content \
   apps/personal-card/src/contracts \
   apps/personal-card/src/evidence \
   apps/personal-card/src/setup; do
