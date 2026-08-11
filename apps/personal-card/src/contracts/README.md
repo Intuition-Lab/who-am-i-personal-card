@@ -30,7 +30,7 @@ The shared contract module also defines these narrower boundaries:
   write from an applied correction whose affected conclusions were verified
   after a fresh Snapshot load.
 
-The pinned Persome `0.3.2` / `e1315d03` MCP currently returns
+The pinned Persome `0.3.2` / `59b2d2e1` MCP currently returns
 `{kind, applied, reason, ok}` from `correct_memory`, without a receipt or an
 affected-conclusion list. `LocalPersomeProvider` keeps that response compatible:
 after `ok` plus a non-empty `applied`, it reloads the Snapshot, derives removed

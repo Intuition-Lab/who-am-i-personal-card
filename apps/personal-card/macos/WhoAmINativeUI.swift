@@ -169,6 +169,7 @@ private struct PersonalModelStatus: Decodable {
     let installed: Bool?
     let initialized: Bool?
     let buildStatus: String?
+    let hasUsableModel: Bool?
     let connection: String?
 }
 
@@ -384,6 +385,9 @@ struct SearchResponse: Decodable {
     let evidenceRefs: [String]?
     let source: String?
     let timeRange: String?
+    let method: String?
+    let degraded: Bool?
+    let degradationReason: String?
 }
 
 struct SearchResult: Decodable, Identifiable {
@@ -688,6 +692,7 @@ final class PersonalModelAppState: ObservableObject {
     @Published private(set) var searchResults: [SearchResult] = []
     @Published private(set) var searchPhase: NativeRequestPhase = .idle
     @Published private(set) var searchErrorMessage: String?
+    @Published private(set) var searchDegradedMessage: String?
     @Published var question = ""
     @Published private(set) var answer = ""
     @Published private(set) var askResponse: AskResponse?
@@ -755,9 +760,16 @@ final class PersonalModelAppState: ObservableObject {
     }
 
     var isModelForming: Bool {
+        let hasSnapshotContent = (snapshot?.personalModel?.memoryCount ?? 0) > 0
+            || !(snapshot?.personalModel?.faces ?? []).isEmpty
+            || snapshot?.personalModel?.root?.trimmedNonEmpty != nil
+            || !(snapshot?.time?.days ?? []).isEmpty
+        if personalModelStatus?.hasUsableModel == true || hasSnapshotContent {
+            return false
+        }
         let buildStatus = personalModelStatus?.buildStatus?.lowercased() ?? ""
         let building = ["not_built", "building", "forming", "empty"].contains(buildStatus)
-        return building || (snapshot?.personalModel?.memoryCount ?? 0) == 0
+        return building || personalModelStatus?.hasUsableModel == false
     }
 
     var authorizationLimited: Bool {
@@ -982,18 +994,25 @@ final class PersonalModelAppState: ObservableObject {
             searchResults = []
             searchPhase = .idle
             searchErrorMessage = nil
+            searchDegradedMessage = nil
             return
         }
         searchResults = []
         searchPhase = .loading
         searchErrorMessage = nil
+        searchDegradedMessage = nil
         do {
             let response: SearchResponse = try await request(
                 path: "api/model/search",
                 method: "POST",
-                json: ["query": query]
+                json: ["query": query],
+                timeoutInterval: 180
             )
             searchResults = response.results ?? []
+            if response.degraded == true {
+                searchDegradedMessage = response.degradationReason
+                    ?? "实时语义搜索暂时不可用，当前显示关键词匹配结果。"
+            }
             if searchResults.isEmpty {
                 searchPhase = .empty
             } else if response.sufficientEvidence == false
@@ -1005,6 +1024,7 @@ final class PersonalModelAppState: ObservableObject {
         } catch {
             searchPhase = .failure
             searchErrorMessage = error.localizedDescription
+            searchDegradedMessage = nil
         }
     }
 
@@ -1019,7 +1039,8 @@ final class PersonalModelAppState: ObservableObject {
             let response: AskResponse = try await request(
                 path: "api/model/ask",
                 method: "POST",
-                json: ["question": value]
+                json: ["question": value],
+                timeoutInterval: 180
             )
             askResponse = response
             answer = response.answer
@@ -1235,7 +1256,8 @@ final class PersonalModelAppState: ObservableObject {
     private func request<Response: Decodable>(
         path: String,
         method: String = "GET",
-        json: [String: String]? = nil
+        json: [String: String]? = nil,
+        timeoutInterval: TimeInterval = 30
     ) async throws -> Response {
         guard let url = URL(string: path, relativeTo: baseURL) else {
             throw NativeAPIError.invalidResponse
@@ -1243,7 +1265,7 @@ final class PersonalModelAppState: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        request.timeoutInterval = 30
+        request.timeoutInterval = timeoutInterval
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let json {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -2644,6 +2666,16 @@ private struct NativeNowPanel: View {
                 .padding(16)
                 .background(Color.accentColor.opacity(0.05))
                 Divider()
+            }
+
+            if [.success, .insufficient].contains(state.searchPhase),
+               let message = state.searchDegradedMessage {
+                NativeInlineState(
+                    symbol: "exclamationmark.magnifyingglass",
+                    title: "当前为关键词降级搜索",
+                    detail: message,
+                    tint: .orange
+                )
             }
 
             switch state.searchPhase {

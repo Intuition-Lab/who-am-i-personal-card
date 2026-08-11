@@ -8,6 +8,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { LocalPersomeContentBackend } from "../../src/content/personal-model-content-backend.mjs";
+
 const projectRoot = new URL("../../", import.meta.url);
 const fakePersome = fileURLToPath(
   new URL("../fixtures/fake-persome-cli.mjs", import.meta.url),
@@ -33,6 +35,33 @@ async function stopServer(child) {
   if (child.exitCode === null) child.kill("SIGTERM");
   if (child.exitCode === null) await once(child, "exit");
 }
+
+test("local content search skips unused Runtime chain narration", async () => {
+  let searchArguments;
+  let closeCalls = 0;
+  const backend = new LocalPersomeContentBackend({
+    connectPersome: async () => ({
+      callTool: async (name, args) => {
+        assert.equal(name, "search");
+        searchArguments = args;
+        return {
+          structuredContent: {
+            result: JSON.stringify({ query: args.query, results: [] }),
+          },
+        };
+      },
+      close: () => {
+        closeCalls += 1;
+      },
+    }),
+  });
+
+  await backend.search({ modelId: "owner", query: "release evidence" });
+
+  assert.equal(searchArguments.include_chains, false);
+  assert.equal(searchArguments.include_bodies, true);
+  assert.equal(closeCalls, 1);
+});
 
 test("local content backend provides semantic search, grounded ask, refusal, fallback, and fresh corrections", async (t) => {
   await chmod(fakePersome, 0o755);
@@ -150,6 +179,9 @@ test("local content backend provides semantic search, grounded ask, refusal, fal
   assert.equal(search.body.results[0].contentType, "observed");
   assert.equal(search.body.results[0].confidence, 0.94);
   assert.equal(search.body.results[0].method, "persome-mcp-search");
+  assert.equal(search.body.method, "persome-mcp-search");
+  assert.equal(search.body.degraded, false);
+  assert.equal(search.body.degradationReason, null);
   assert.ok(search.body.results.every((result) => result.modelId === modelId));
   assert.ok(search.body.results.every((result) =>
     result.evidenceRefs.every((reference) => reference.startsWith(`${modelId}:`))
@@ -228,6 +260,9 @@ test("local content backend provides semantic search, grounded ask, refusal, fal
   assert.ok(degraded.body.results.every(({ method }) =>
     method === "snapshot-keyword-search"
   ));
+  assert.equal(degraded.body.method, "snapshot-keyword-search");
+  assert.equal(degraded.body.degraded, true);
+  assert.match(degraded.body.degradationReason, /关键词匹配/u);
   assert.doesNotMatch(JSON.stringify(degraded.body), /private fake MCP/u);
 
   const correction = await post("/api/model/correct", {

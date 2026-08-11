@@ -2187,6 +2187,9 @@ assert len(context) <= 7200
   LC_ALL=C grep -Fq \
     '"query": "where is the launch plan?"' \
     "${install_home}/context-hook-queries.log"
+  LC_ALL=C grep -Fq \
+    '"include_chains": false' \
+    "${install_home}/context-hook-queries.log"
 }
 
 test_context_hook_loads_session_model() {

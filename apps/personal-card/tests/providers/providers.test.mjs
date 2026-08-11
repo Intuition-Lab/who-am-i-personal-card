@@ -313,6 +313,21 @@ test("LocalPersomeProvider degrades a failed MCP search to model-bound Snapshot 
   assert.equal(JSON.stringify(results).includes("/Users/private"), false);
 });
 
+test("LocalPersomeProvider never disguises a failed semantic search as ordinary no-results", async () => {
+  const provider = createLocalProvider({
+    operations: {
+      search: async () => {
+        throw new Error("private MCP failure");
+      },
+    },
+  });
+  await assert.rejects(
+    provider.search("cecilia", "UNMATCHED_SEMANTIC_QUERY_7F31"),
+    ({ code, status }) =>
+      code === "SEMANTIC_SEARCH_UNAVAILABLE" && status === 503,
+  );
+});
+
 test("LocalPersomeProvider resolves original memory/activity records without promoting broken links", async () => {
   const provider = createLocalProvider({
     operations: {

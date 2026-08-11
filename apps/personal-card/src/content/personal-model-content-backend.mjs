@@ -418,6 +418,7 @@ export class LocalPersomeContentBackend {
         top_k: normalized.topK,
         breadth: normalized.breadth,
         include_bodies: true,
+        include_chains: false,
         ...(normalized.paths ? { paths: normalized.paths } : {}),
         ...(normalized.since ? { since: normalized.since } : {}),
         ...(normalized.until ? { until: normalized.until } : {}),

@@ -17,6 +17,8 @@ test("native beta UI keeps new grounding fields optional and old responses compa
   assert.match(source, /let contentType: String\?/);
   assert.match(source, /let timeRange: String\?/);
   assert.match(source, /let confidence: Double\?/);
+  assert.match(source, /let degraded: Bool\?/);
+  assert.match(source, /let degradationReason: String\?/);
 });
 
 test("search and ask expose loading, empty, failure, and insufficient-evidence states", async () => {
@@ -31,6 +33,16 @@ test("search and ask expose loading, empty, failure, and insufficient-evidence s
   assert.match(source, /Evidence 不足/);
   assert.match(source, /NativeSearchResultRow/);
   assert.match(source, /loadEvidence\(reference\)/);
+  assert.match(source, /当前为关键词降级搜索/);
+  assert.match(source, /timeoutInterval: 180/);
+});
+
+test("a populated model is ready even when a legacy Runtime reports not_built", async () => {
+  const source = await readFile(nativeUIPath, "utf8");
+
+  assert.match(source, /let hasUsableModel: Bool\?/);
+  assert.match(source, /personalModelStatus\?\.hasUsableModel == true \|\| hasSnapshotContent/);
+  assert.match(source, /personalModel\?\.memoryCount \?\? 0\) > 0/);
 });
 
 test("native beta language separates records, inference, generated text, and suggestions", async () => {

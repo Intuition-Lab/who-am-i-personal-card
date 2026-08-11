@@ -131,6 +131,7 @@ fi
   assert.equal(status.profile.handle, "@existing-owner");
   assert.equal(status.profile.origin, "existing-personal-model");
   assert.equal(status.personalModel.connection, "existing");
+  assert.equal(status.personalModel.hasUsableModel, true);
 
   const bootstrapResponse = await fetch(`${baseUrl}/api/model/bootstrap`);
   const bootstrap = await bootstrapResponse.json();

@@ -301,6 +301,22 @@ export class LocalPersomeProvider extends SnapshotBackedPersonalModelProvider {
         return freezeCopy(results);
       } catch {
         // A complete Snapshot is still a safe, model-bound degraded search.
+        // If it has no match, fail explicitly instead of presenting a Runtime
+        // outage as an ordinary zero-result semantic search.
+        const degradedResults = await super.search(
+          modelId,
+          query,
+          grant,
+          options,
+        );
+        if (degradedResults.length === 0) {
+          throw new PersonalModelProviderError(
+            "SEMANTIC_SEARCH_UNAVAILABLE",
+            "Semantic Personal Model search is temporarily unavailable.",
+            { status: 503 },
+          );
+        }
+        return degradedResults;
       }
     }
     return super.search(modelId, query, grant, options);
