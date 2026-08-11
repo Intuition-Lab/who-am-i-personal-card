@@ -346,6 +346,10 @@ if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
   /bin/cp -R \
     "${bootstrap_build_root}/Who Am I.app" \
     "${stage_root}/Who Am I.app"
+  # The bootstrap builder signs its standalone output. Embedding the complete
+  # product invalidates that resource seal, so remove it before adding payload
+  # and sign the final bundle exactly once below.
+  /usr/bin/codesign --remove-signature "${stage_root}/Who Am I.app"
   embedded_product_root="${stage_root}/Who Am I.app/Contents/Resources/product"
   /bin/mkdir -p "${embedded_product_root}"
   for embedded_entry in \

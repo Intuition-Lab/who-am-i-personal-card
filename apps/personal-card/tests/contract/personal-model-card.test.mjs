@@ -86,6 +86,17 @@ test("Cecilia and Lin fixtures parse into detached, deeply frozen Snapshots", as
   assert.ok(Object.isFrozen(cecilia.personalModel.faces));
   assert.ok(Object.isFrozen(cecilia.reports[0].sections[0]));
 
+  for (const snapshot of [cecilia, lin]) {
+    const future = snapshot.now.items.find(({ kind }) => kind === "future");
+    assert.equal(future.metadata.provenance, "generated");
+    assert.match(future.metadata.method, /continuation-suggestion/);
+    assert.ok(future.metadata.sourceRefs.length > 0);
+    assert.ok(future.metadata.timeRange.start.length > 0);
+    assert.ok(future.metadata.timeRange.end.length > 0);
+    assert.ok(future.dayId.length > 0);
+    assert.ok(future.app.length > 0);
+  }
+
   ceciliaInput.model.handle = "@changed-after-parse";
   assert.equal(cecilia.model.handle, "@cecilia");
 });
