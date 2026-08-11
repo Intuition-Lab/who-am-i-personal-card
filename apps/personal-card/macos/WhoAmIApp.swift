@@ -70,7 +70,9 @@ private enum LauncherError: LocalizedError {
 @MainActor
 private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
+    private var maintenanceWindow: NSWindow?
     private var appState: PersonalModelAppState?
+    private var lifecycleController: NativeLifecycleController?
     private var statusItem: NSStatusItem?
     private var statusMenuModelItem: NSMenuItem?
     private var statusMenu: NSMenu?
@@ -92,8 +94,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             isBootstrapInstaller || whoAmIVisualQAActive ? .regular : .accessory
         )
         createMainMenu()
-        createStatusItem()
         createWindow(bootstrap: isBootstrapInstaller)
+        if !isBootstrapInstaller {
+            createStatusItem()
+        }
         NSApp.activate(ignoringOtherApps: true)
 
         Task { [weak self] in
@@ -115,6 +119,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         isTerminating = true
+        lifecycleController?.cancel()
         if let escapeMonitor {
             NSEvent.removeMonitor(escapeMonitor)
         }
@@ -134,6 +139,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
             keyEquivalent: ""
         )
+        if !isBootstrapInstaller {
+            let maintenanceItem = NSMenuItem(
+                title: "安装与维护…",
+                action: #selector(showMaintenance(_:)),
+                keyEquivalent: ","
+            )
+            maintenanceItem.target = self
+            applicationMenu.addItem(maintenanceItem)
+        }
         applicationMenu.addItem(.separator())
         applicationMenu.addItem(
             withTitle: "Quit Who Am I",
@@ -334,6 +348,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         modelItem.isEnabled = false
         menu.addItem(modelItem)
         menu.addItem(.separator())
+        let maintenanceItem = NSMenuItem(
+            title: "安装状态、更新与卸载…",
+            action: #selector(showMaintenance(_:)),
+            keyEquivalent: ""
+        )
+        maintenanceItem.target = self
+        menu.addItem(maintenanceItem)
+        menu.addItem(.separator())
         let quitItem = NSMenuItem(
             title: "退出 Who Am I",
             action: #selector(quitApplication(_:)),
@@ -440,6 +462,43 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
+    @objc private func showMaintenance(_ sender: Any?) {
+        do {
+            if let maintenanceWindow {
+                maintenanceWindow.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+                return
+            }
+            let productVersion = try bundleString("WhoAmIProductVersion")
+            let persomeRoot = try fileURL(fromBundleKey: "WhoAmIPersomeRoot")
+            let controller = lifecycleController ?? NativeLifecycleController()
+            lifecycleController = controller
+            let host = NSHostingView(
+                rootView: NativeMaintenanceView(
+                    controller: controller,
+                    productVersion: productVersion,
+                    persomeRoot: persomeRoot
+                )
+            )
+            let panel = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 720, height: 700),
+                styleMask: [.titled, .closable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            panel.title = "Who Am I · 安装与维护"
+            panel.minSize = NSSize(width: 680, height: 620)
+            panel.contentView = host
+            panel.isReleasedWhenClosed = false
+            panel.center()
+            panel.makeKeyAndOrderFront(nil)
+            maintenanceWindow = panel
+            NSApp.activate(ignoringOtherApps: true)
+        } catch {
+            report(error)
+        }
+    }
+
     private func makeLoadingView() -> NSView {
         let container = NSView()
         container.wantsLayer = true
@@ -488,7 +547,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         title.alignment = .center
 
         let detail = NSTextField(
-            wrappingLabelWithString: "首次打开会在这台 Mac 上初始化你的 Personal Model。安装提示会显示在终端窗口中；完成后，Who Am I 会自动打开。"
+            wrappingLabelWithString: "首次打开会先验证安装包，再在 App 内初始化或连接你的 Personal Model。"
         )
         detail.font = .systemFont(ofSize: 15)
         detail.textColor = .secondaryLabelColor
@@ -550,7 +609,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             let expectedVersion = try bundleString("WhoAmIProductVersion")
             if isBootstrapInstaller {
-                try await installAndOpenNativeApp(expectedVersion: expectedVersion)
+                try beginNativeBootstrap(expectedVersion: expectedVersion)
                 return
             }
             if visualQAServerOverride != nil {
@@ -593,22 +652,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func installAndOpenNativeApp(expectedVersion: String) async throws {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let installedApp = home
-            .appendingPathComponent("Applications", isDirectory: true)
-            .appendingPathComponent("Who Am I.app", isDirectory: true)
-        let productRoot = home
-            .appendingPathComponent(".persome", isDirectory: true)
-            .appendingPathComponent("product-app", isDirectory: true)
-            .appendingPathComponent(expectedVersion, isDirectory: true)
-        let completionMarker = home
-            .appendingPathComponent("Library/Application Support/Who Am I", isDirectory: true)
-            .appendingPathComponent(
-                "installer-complete-\(expectedVersion).txt",
-                isDirectory: false
-            )
-
+    private func beginNativeBootstrap(expectedVersion: String) throws {
         guard let resourcesURL = Bundle.main.resourceURL else {
             throw LauncherError.missingInstaller("Contents/Resources/product")
         }
@@ -616,78 +660,28 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             .appendingPathComponent("product", isDirectory: true)
             .standardizedFileURL
         let installerURL = packageRoot
-            .appendingPathComponent("Install Who Am I.command", isDirectory: false)
+            .appendingPathComponent("install.sh", isDirectory: false)
         let manifestURL = packageRoot
             .appendingPathComponent("SELF-CONTAINED-SHA256SUMS", isDirectory: false)
         guard
-            FileManager.default.isExecutableFile(atPath: installerURL.path),
+            FileManager.default.fileExists(atPath: installerURL.path),
             FileManager.default.fileExists(atPath: manifestURL.path)
         else {
             throw LauncherError.missingInstaller(installerURL.lastPathComponent)
         }
-
-        let installationStartedAt = Date()
-        let launched = await MainActor.run {
-            NSWorkspace.shared.open(installerURL)
-        }
-        guard launched else {
-            throw LauncherError.installerLaunchFailed
-        }
-
-        for _ in 0..<1_800 {
-            if installationCompleted(
-                markerURL: completionMarker,
-                expectedVersion: expectedVersion,
-                startedAt: installationStartedAt
-            ) && installedProductIsReady(
-                appURL: installedApp,
-                productRoot: productRoot,
-                expectedVersion: expectedVersion
-            ) {
-                openInstalledApplication(installedApp)
-                return
+        let controller = NativeLifecycleController()
+        lifecycleController = controller
+        window?.contentView = NSHostingView(
+            rootView: NativeInstallerView(controller: controller)
+        )
+        controller.configureBootstrap(
+            productRoot: packageRoot,
+            expectedVersion: expectedVersion,
+            completion: { [weak self] installedApp in
+                self?.openInstalledApplication(installedApp)
             }
-            try await Task.sleep(nanoseconds: 1_000_000_000)
-        }
-        throw LauncherError.installationTimedOut
-    }
-
-    private func installationCompleted(
-        markerURL: URL,
-        expectedVersion: String,
-        startedAt: Date
-    ) -> Bool {
-        guard
-            let values = try? markerURL.resourceValues(
-                forKeys: [.contentModificationDateKey, .isRegularFileKey]
-            ),
-            values.isRegularFile == true,
-            let modificationDate = values.contentModificationDate,
-            modificationDate >= startedAt.addingTimeInterval(-1),
-            let marker = try? String(contentsOf: markerURL, encoding: .utf8)
-        else {
-            return false
-        }
-        return marker.split(separator: "\n").contains("version=\(expectedVersion)")
-    }
-
-    private func installedProductIsReady(
-        appURL: URL,
-        productRoot: URL,
-        expectedVersion: String
-    ) -> Bool {
-        let executable = appURL
-            .appendingPathComponent("Contents/MacOS/WhoAmI", isDirectory: false)
-        let versionFile = productRoot
-            .appendingPathComponent("product-version", isDirectory: false)
-        guard
-            FileManager.default.isExecutableFile(atPath: executable.path),
-            let installedVersion = try? String(contentsOf: versionFile, encoding: .utf8)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        else {
-            return false
-        }
-        return installedVersion == expectedVersion
+        )
+        controller.startBootstrap()
     }
 
     private func openInstalledApplication(_ appURL: URL) {

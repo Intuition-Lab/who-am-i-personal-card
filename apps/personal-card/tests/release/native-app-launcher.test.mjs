@@ -8,10 +8,11 @@ const appRoot = fileURLToPath(new URL("../../", import.meta.url));
 const productRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 
 test("production installs a native SwiftUI app with an embedded backend", async () => {
-  const [installer, swiftSource, nativeUI, buildScript, packageBuilder] = await Promise.all([
+  const [installer, swiftSource, nativeUI, lifecycle, buildScript, packageBuilder] = await Promise.all([
     readFile(path.join(productRoot, "install.sh"), "utf8"),
     readFile(path.join(appRoot, "macos/WhoAmIApp.swift"), "utf8"),
     readFile(path.join(appRoot, "macos/WhoAmINativeUI.swift"), "utf8"),
+    readFile(path.join(appRoot, "macos/NativeLifecycle.swift"), "utf8"),
     readFile(path.join(appRoot, "macos/build-native-launcher.sh"), "utf8"),
     readFile(path.join(productRoot, "scripts/build-self-contained-package.sh"), "utf8"),
   ]);
@@ -69,6 +70,12 @@ test("production installs a native SwiftUI app with an embedded backend", async 
   assert.match(buildScript, /WhoAmIManagedInstall/);
   assert.match(buildScript, /--bootstrap/);
   assert.match(buildScript, /WhoAmIBootstrapInstall/);
+  assert.match(swiftSource, /beginNativeBootstrap/);
+  assert.match(swiftSource, /NativeInstallerView/);
+  assert.doesNotMatch(swiftSource, /NSWorkspace\.shared\.open\(installerURL\)/);
+  assert.match(lifecycle, /install\.sh/);
+  assert.match(lifecycle, /"--non-interactive"/);
+  assert.match(lifecycle, /Applications\/Who Am I\.app/);
   assert.match(buildScript, /APP_ICON_SOURCE_DIRECTORY/);
   assert.match(buildScript, /Contents.*Resources/s);
   assert.match(buildScript, /APP_ICON_RESOURCES_DIRECTORY/);
@@ -163,13 +170,11 @@ test("production installs a native SwiftUI app with an embedded backend", async 
   assert.match(nativeUI, /Button \{ selectFuture\(dayID\) \}/);
   assert.match(nativeUI, /func openRewind\(dayID:/);
   assert.match(nativeUI, /state\.openRewind\(dayID: item\.dayId\)/);
-  assert.match(swiftSource, /installAndOpenNativeApp/);
-  assert.match(swiftSource, /Install Who Am I\.command/);
-  assert.match(swiftSource, /Applications.*Who Am I\.app/s);
   assert.match(packageBuilder, /--bootstrap/);
   assert.match(packageBuilder, /Who Am I\.app/);
   assert.match(packageBuilder, /Contents\/Resources\/product/);
   assert.match(packageBuilder, /backend_embedded_in_app/);
+  assert.match(packageBuilder, /codesign --remove-signature/);
 });
 
 test("native app preserves the original V5 interaction surfaces without a WebView", async () => {
