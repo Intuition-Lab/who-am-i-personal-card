@@ -2,8 +2,8 @@
 # data; it is never sourced as shell code.
 RUNTIME_LOCK_SCHEMA="1"
 RUNTIME_REPOSITORY="https://github.com/Intuition-Lab/personal-model.git"
-RUNTIME_COMMIT="59b2d2e154e8d16fb9bb7dfe404a44169a27a9b5"
-RUNTIME_TREE="af47810eef83e9b8d25c5783bcf5d31efd093cf4"
+RUNTIME_COMMIT="3984cc7743e79f8056f8c5c854892932bd41c70b"
+RUNTIME_TREE="4c7a1f8a3a63a21f73a36ae16a1cda9cc72258c9"
 RUNTIME_PROJECT_NAME="persome-core"
 RUNTIME_PROJECT_VERSION="0.3.2"
 RUNTIME_CLI="persome"
