@@ -1603,24 +1603,44 @@ private struct WhoAmIBackground: View {
     @ViewBuilder
     var body: some View {
         if whoAmIVisualQAOpaque {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.56, green: 0.61, blue: 0.71),
-                    Color(red: 0.66, green: 0.65, blue: 0.62),
-                    Color(red: 0.79, green: 0.75, blue: 0.69),
-                    Color(red: 0.89, green: 0.86, blue: 0.82),
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .overlay(
-                RadialGradient(
-                    colors: [.white.opacity(0.34), .clear],
-                    center: .topTrailing,
-                    startRadius: 30,
-                    endRadius: 620
-                )
-            )
+            GeometryReader { geometry in
+                let radius = max(geometry.size.width, geometry.size.height)
+                ZStack {
+                    LinearGradient(
+                        gradient: Gradient(stops: [
+                            .init(color: nativeHexColor("#8E9BB5"), location: 0),
+                            .init(color: nativeHexColor("#A9A79E"), location: 0.38),
+                            .init(color: nativeHexColor("#C9BEB0"), location: 0.68),
+                            .init(color: nativeHexColor("#E4DDD2"), location: 1),
+                        ]),
+                        startPoint: UnitPoint(x: 0.67, y: 0),
+                        endPoint: UnitPoint(x: 0.33, y: 1)
+                    )
+                    RadialGradient(
+                        gradient: Gradient(stops: [
+                            .init(color: .white.opacity(0.34), location: 0),
+                            .init(color: .clear, location: 0.55),
+                        ]),
+                        center: UnitPoint(x: 0.78, y: 0.08),
+                        startRadius: 0,
+                        endRadius: radius * 0.86
+                    )
+                    RadialGradient(
+                        gradient: Gradient(stops: [
+                            .init(
+                                color: Color(red: 60 / 255, green: 70 / 255, blue: 95 / 255)
+                                    .opacity(0.22),
+                                location: 0
+                            ),
+                            .init(color: .clear, location: 0.60),
+                        ]),
+                        center: UnitPoint(x: 0.12, y: 0.92),
+                        startRadius: 0,
+                        endRadius: radius * 0.70
+                    )
+                }
+                .frame(width: geometry.size.width, height: geometry.size.height)
+            }
             .ignoresSafeArea()
         } else {
             Color.clear.ignoresSafeArea()
@@ -1876,13 +1896,13 @@ private struct NativeCardMaterial {
             )
         case "graphite":
             return NativeCardMaterial(
-                top: Color(red: 0.12, green: 0.12, blue: 0.14),
-                bottom: Color(red: 0.035, green: 0.035, blue: 0.045),
-                name: Color(red: 0.045, green: 0.045, blue: 0.055),
-                corner: Color.white.opacity(0.42),
-                detail: Color.white.opacity(0.78),
-                glyphOn: Color.white.opacity(0.94),
-                glyphOff: Color.white.opacity(0.10),
+                top: nativeHexColor("#1E1E22"),
+                bottom: nativeHexColor("#111113"),
+                name: nativeHexColor("#0C0C0E"),
+                corner: nativeHexColor("#6E6E73"),
+                detail: nativeHexColor("#C8C8CC"),
+                glyphOn: nativeHexColor("#F5F5F4"),
+                glyphOff: nativeHexColor("#26262A"),
                 isLight: false
             )
         default:
@@ -1999,8 +2019,12 @@ private struct NativeHeroCard: View {
                 .fill(
                     LinearGradient(
                         colors: [material.top, material.bottom],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+                        startPoint: materialKey == "graphite"
+                            ? UnitPoint(x: 0.71, y: 0)
+                            : .topLeading,
+                        endPoint: materialKey == "graphite"
+                            ? UnitPoint(x: 0.29, y: 1)
+                            : .bottomTrailing
                     )
                 )
             RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -2009,28 +2033,38 @@ private struct NativeHeroCard: View {
                         colors: [
                             materialKey == "ceramic"
                                 ? Color.white.opacity(0.88)
-                                : Color(red: 0.36, green: 0.48, blue: 1.0)
+                                : nativeHexColor("#5B79FF")
                                     .opacity(materialKey == "graphite" ? 0.14 : 0.08),
                             .clear,
                         ],
                         center: UnitPoint(x: 0.18, y: -0.10),
                         startRadius: 0,
-                        endRadius: 275
+                        endRadius: materialKey == "graphite" ? 224 : 275
                     )
                 )
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(
                     LinearGradient(
                         stops: [
-                            .init(color: .clear, location: 0.32),
+                            .init(
+                                color: .clear,
+                                location: materialKey == "graphite" ? 0.34 : 0.32
+                            ),
                             .init(
                                 color: .white.opacity(material.isLight ? 0.24 : 0.045),
                                 location: 0.42
                             ),
-                            .init(color: .clear, location: 0.54),
+                            .init(
+                                color: .clear,
+                                location: materialKey == "graphite" ? 0.50 : 0.54
+                            ),
                         ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+                        startPoint: materialKey == "graphite"
+                            ? UnitPoint(x: 0, y: 0.27)
+                            : .topLeading,
+                        endPoint: materialKey == "graphite"
+                            ? UnitPoint(x: 1, y: 0.73)
+                            : .bottomTrailing
                     )
                 )
             RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -2114,14 +2148,26 @@ private struct NativeHeroCard: View {
                 .foregroundStyle(material.corner)
                 Spacer()
                 HStack(alignment: .bottom) {
-                    Text("IDENTITY\nPERSONAL MODEL")
+                    VStack(alignment: .leading, spacing: 5.5) {
+                        Text("IDENTITY")
+                            .foregroundStyle(material.corner)
+                        Text("PERSONAL MODEL")
+                            .fontWeight(.medium)
+                            .foregroundStyle(material.detail)
+                    }
                     Spacer()
-                    Text(cardLocator)
+                    let locatorLines = cardLocator.components(separatedBy: "\n")
+                    VStack(alignment: .trailing, spacing: 5.5) {
+                        Text(locatorLines.first ?? "ONE OF ONE")
+                            .foregroundStyle(material.corner)
+                        Text(locatorLines.dropFirst().first ?? "")
+                            .fontWeight(.medium)
+                            .foregroundStyle(material.detail)
+                    }
                         .multilineTextAlignment(.trailing)
                 }
                 .font(.system(size: 8.5, design: .monospaced))
                 .tracking(1.4)
-                .foregroundStyle(material.corner)
             }
             VStack(spacing: 17) {
                 LazyVGrid(
@@ -2142,7 +2188,8 @@ private struct NativeHeroCard: View {
                     .font(.system(size: 34, weight: .medium, design: .default))
                     .tracking(2.9)
                     .foregroundStyle(material.name)
-                    .shadow(color: .white.opacity(0.16), radius: 7)
+                    .shadow(color: .white.opacity(0.22), radius: 0.5, y: 1)
+                    .shadow(color: .black.opacity(0.85), radius: 1, y: -1)
             }
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(
@@ -2432,6 +2479,7 @@ private struct NativeHeroCard: View {
 private struct NativeNowPanel: View {
     @ObservedObject var state: PersonalModelAppState
     let snapshot: PersonalModelSnapshot
+    @State private var spotlightPlaceholder = "search your life — 或直接问"
     @FocusState private var searchFocused: Bool
     @FocusState private var askFocused: Bool
 
@@ -2442,9 +2490,28 @@ private struct NativeNowPanel: View {
     }
 
     private var nowDateLabel: String {
-        snapshot.card?.monthYear?.trimmedNonEmpty
+        let value = snapshot.card?.monthYear?.trimmedNonEmpty
             ?? snapshot.personalModel?.updatedAt.flatMap(compactDateLabel)
             ?? "AS OF NOW"
+        return value.replacingOccurrences(of: " / ", with: " ")
+    }
+
+    private var placeholderPool: [String] {
+        visibleNowItems.map(\.displayTitle) + ["想说什么，也可以直接说。"]
+    }
+
+    private var placeholderAnimationID: String {
+        placeholderPool.joined(separator: "\u{1F}")
+    }
+
+    private var futureActionLabel: String {
+        guard let future = visibleNowItems.first(where: \.isFutureLike) else {
+            return "看看接下来 ›"
+        }
+        let timing = "\(future.when ?? "") \(future.dayId ?? "")".lowercased()
+        return timing.contains("明天") || timing.contains("tomorrow")
+            ? "看看明天 ›"
+            : "看看接下来 ›"
     }
 
     var body: some View {
@@ -2454,7 +2521,7 @@ private struct NativeNowPanel: View {
                     .foregroundStyle(.secondary)
                     .font(.system(size: 18, weight: .regular))
                     .frame(width: 20, height: 20)
-                TextField("搜索你记得的事…", text: $state.searchQuery)
+                TextField(spotlightPlaceholder, text: $state.searchQuery)
                     .textFieldStyle(.plain)
                     .font(.system(size: 18, weight: .regular))
                     .focused($searchFocused)
@@ -2515,9 +2582,9 @@ private struct NativeNowPanel: View {
                     .font(.caption2.monospaced())
                     .foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 13)
-            .padding(.bottom, 7)
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+            .padding(.bottom, 8)
 
             if state.isAskOpen {
                 VStack(alignment: .leading, spacing: 12) {
@@ -2593,7 +2660,7 @@ private struct NativeNowPanel: View {
                         NativeNowRow(item: item) {
                             state.openRewind(dayID: item.dayId)
                         }
-                        Divider().padding(.leading, 20)
+                        Divider().padding(.horizontal, 20)
                     }
                 }
             case .loading:
@@ -2631,12 +2698,12 @@ private struct NativeNowPanel: View {
                 )
                 ForEach(state.searchResults, id: \.stableID) { result in
                     NativeSearchResultRow(state: state, result: result)
-                    Divider().padding(.leading, 20)
+                    Divider().padding(.horizontal, 20)
                 }
             case .success:
                 ForEach(state.searchResults, id: \.stableID) { result in
                     NativeSearchResultRow(state: state, result: result)
-                    Divider().padding(.leading, 20)
+                    Divider().padding(.horizontal, 20)
                 }
             }
 
@@ -2646,13 +2713,15 @@ private struct NativeNowPanel: View {
                 Button("时间") { state.selectedSection = .rewind }
                     .buttonStyle(.plain)
                 if visibleNowItems.contains(where: \.isFutureLike) {
-                    Button("看看接下来 ›") { state.selectedSection = .rewind }
+                    Button(futureActionLabel) { state.selectedSection = .rewind }
                         .buttonStyle(.plain)
                 }
             }
             .font(.caption)
             .foregroundStyle(.tertiary)
-            .padding(16)
+            .padding(.horizontal, 21)
+            .padding(.top, 12)
+            .padding(.bottom, 13)
         }
         .background {
             RoundedRectangle(cornerRadius: 19, style: .continuous)
@@ -2672,6 +2741,46 @@ private struct NativeNowPanel: View {
         .shadow(color: .black.opacity(0.15), radius: 26, y: 18)
         .onChange(of: state.searchFocusRequest) { _ in
             searchFocused = true
+        }
+        .task(id: placeholderAnimationID) {
+            await animateSpotlightPlaceholder()
+        }
+    }
+
+    @MainActor
+    private func animateSpotlightPlaceholder() async {
+        let pool = placeholderPool.filter { !$0.isEmpty }
+        guard !pool.isEmpty else {
+            spotlightPlaceholder = "搜索你记得的事…"
+            return
+        }
+        if whoAmIVisualQAActive {
+            spotlightPlaceholder = pool[0]
+            return
+        }
+        var index = 0
+        while !Task.isCancelled {
+            let phrase = Array(pool[index % pool.count])
+            spotlightPlaceholder = ""
+            for length in 1...phrase.count {
+                guard !Task.isCancelled else { return }
+                spotlightPlaceholder = String(phrase.prefix(length))
+                try? await Task.sleep(nanoseconds: 95_000_000)
+            }
+            for _ in 0..<24 {
+                guard !Task.isCancelled else { return }
+                try? await Task.sleep(nanoseconds: 95_000_000)
+            }
+            var remaining = phrase
+            while !remaining.isEmpty {
+                guard !Task.isCancelled else { return }
+                remaining.removeLast(min(2, remaining.count))
+                spotlightPlaceholder = remaining.isEmpty
+                    ? "search your life — 或直接问"
+                    : String(remaining)
+                try? await Task.sleep(nanoseconds: 95_000_000)
+            }
+            index = (index + 1) % pool.count
         }
     }
 }
@@ -4258,7 +4367,7 @@ private struct NativeNowRow: View {
         HStack(alignment: .center, spacing: 10) {
             NativeActivityIcon(text: "\(item.title) \(item.why ?? "")")
                 .frame(width: 34, alignment: .leading)
-            HStack(spacing: 5) {
+            HStack(spacing: 6) {
                 Text(kindMarker)
                     .font(.system(size: 15, design: .serif))
                 Text(kindLabel)
@@ -4282,10 +4391,16 @@ private struct NativeNowRow: View {
                 Text(when)
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.tertiary)
+            } else if item.hasReliableSuggestionSource,
+                      let when = item.when?.trimmedNonEmpty {
+                Text(when)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
             }
         }
-        .padding(.horizontal, 18)
+        .padding(.horizontal, 20)
         .padding(.vertical, 12)
+        .opacity(item.isFutureLike ? 0.76 : 1)
         .contentShape(Rectangle())
         .onTapGesture(perform: openItem)
         .accessibilityAddTraits(.isButton)
@@ -4356,12 +4471,23 @@ private struct NativeActivityIcon: View {
                     .scaledToFill()
             } else {
                 RoundedRectangle(cornerRadius: 7)
-                    .fill(Color.black.opacity(0.035))
-                    .overlay(
-                        Circle()
-                            .stroke(Color.primary.opacity(0.58), lineWidth: 1.4)
-                            .frame(width: 9, height: 9)
+                    .fill(
+                        LinearGradient(
+                            colors: [nativeHexColor("#FAFAF8"), nativeHexColor("#DAD8D2")],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
+                    .overlay {
+                        Circle()
+                            .fill(nativeHexColor("#2C2C2E"))
+                            .frame(width: 10, height: 10)
+                            .overlay {
+                                Circle()
+                                    .fill(nativeHexColor("#F5F5F2"))
+                                    .frame(width: 3.2, height: 3.2)
+                            }
+                    }
             }
         }
         .frame(width: 29, height: 29)
