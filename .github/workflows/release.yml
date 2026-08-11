@@ -17,6 +17,7 @@ jobs:
     name: validate and build release
     runs-on: macos-15
     timeout-minutes: 30
+    environment: github-release
     steps:
       - name: Check out tagged source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -75,8 +76,17 @@ jobs:
 
       - name: Build the exact release assets
         shell: bash
+        env:
+          WHOAMI_APPLE_DEVELOPER_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          WHOAMI_APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          WHOAMI_APPLE_SIGNING_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_SIGNING_KEYCHAIN_PASSWORD }}
+          WHOAMI_APPLE_SIGN_IDENTITY: ${{ vars.APPLE_SIGN_IDENTITY }}
+          WHOAMI_APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          WHOAMI_APPLE_NOTARY_API_KEY_BASE64: ${{ secrets.APPLE_NOTARY_API_KEY_BASE64 }}
+          WHOAMI_APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          WHOAMI_APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
         run: |
-          bash scripts/build-release-assets.sh \
+          bash scripts/build-notarized-release-assets.sh \
             --repository "${GITHUB_REPOSITORY}" \
             --tag "${GITHUB_REF_NAME}" \
             --commit "${GITHUB_SHA}" \
@@ -88,6 +98,11 @@ jobs:
             cd dist
             shasum -a 256 --check SHA256SUMS
             /usr/bin/hdiutil verify "${package_name}.dmg"
+            /usr/bin/codesign --verify --strict "${package_name}.dmg"
+            /usr/bin/xcrun stapler validate "${package_name}.dmg"
+            /usr/sbin/spctl --assess --type open \
+              --context context:primary-signature \
+              --verbose=4 "${package_name}.dmg"
             test "$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 5
           )
 
@@ -296,6 +311,10 @@ jobs:
           grep -Fxq "backend_embedded_in_app=true" dist/RELEASE-METADATA.txt
           grep -Fxq \
             "embedded_product_path=Who Am I.app/Contents/Resources/product" \
+            dist/RELEASE-METADATA.txt
+          grep -Fxq "apple_signing=developer-id" dist/RELEASE-METADATA.txt
+          grep -Fxq "apple_dmg_notarized=true" dist/RELEASE-METADATA.txt
+          grep -Fxq "apple_team_id=${{ vars.APPLE_TEAM_ID }}" \
             dist/RELEASE-METADATA.txt
           grep -Fxq "dmg_asset=${dmg_name}" dist/RELEASE-METADATA.txt
           grep -Fxq "tar_asset=${tar_name}" dist/RELEASE-METADATA.txt

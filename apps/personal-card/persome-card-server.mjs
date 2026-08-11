@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import {
   createModelRequestContext,
   GrantTokenService,
+  requireScope,
   SessionModelService,
   ViewerSessionStore,
 } from "./src/auth/index.mjs";
@@ -106,6 +107,7 @@ const evidenceService = new EvidenceService({
   providerRegistry,
   sessionService: connectorSessionService,
   eventStore: connectorEventStore,
+  loadCoastFrame: loadCoastFrameContent,
 });
 const activeConnectorSessions = new Map();
 
@@ -909,6 +911,35 @@ async function coastFramesForDay(key) {
   } catch {
     return [];
   }
+}
+
+function secureCoastImagePath(value) {
+  const imagePath = resolve(String(value || ""));
+  const imageRoot = resolve("/tmp/coast-cli");
+  if (
+    !imagePath.startsWith(`${imageRoot}${sep}`)
+    || extname(imagePath).toLowerCase() !== ".png"
+  ) {
+    return "";
+  }
+  try {
+    const file = lstatSync(imagePath);
+    return file.isFile() && !file.isSymbolicLink() ? imagePath : "";
+  } catch {
+    return "";
+  }
+}
+
+async function loadCoastFrameContent({ frameId }) {
+  const { stdout } = await runCoast([
+    "query", "image", "--id", String(frameId), "--crop",
+  ], 15000);
+  const imagePath = secureCoastImagePath(stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean) || "");
+  if (!imagePath) return null;
+  return { imagePath };
 }
 
 async function attachCoastFrames(live, modelId = ownerProfile?.modelId || "local-owner") {
@@ -2105,6 +2136,82 @@ async function serveModelEvidence(req, res, url, pathReference) {
   });
 }
 
+async function serveModelRewindFrames(req, res, url) {
+  const context = modelContext(req, res, url, undefined, "rewind:read");
+  requireScope(context.authorization, "evidence:read");
+  const dayId = String(url.searchParams.get("day") || "");
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(dayId)
+    || !context.snapshot.time?.days?.some((day) => day.id === dayId)
+  ) {
+    sendJson(res, 404, {
+      ok: false,
+      code: "REWIND_DAY_NOT_FOUND",
+      error: "这一天不在当前 Personal Model 的 Rewind 中",
+    });
+    return;
+  }
+
+  const frames = await coastFramesForDay(dayId);
+  const responseFrames = frames.map((frame) => {
+    const frameId = String(frame.id);
+    evidenceService.allowCoastFrame({
+      viewerSessionId: context.sessionId,
+      modelId: context.modelId,
+      frameId,
+    });
+    return {
+      reference: `${context.modelId}:coast:${frameId}`,
+      time: frame.time,
+      app: frame.app,
+      title: frame.title,
+      duration: frame.duration,
+      color: frame.color,
+      timestamp: frame.timestamp,
+    };
+  });
+  sendJson(res, 200, {
+    ok: true,
+    modelId: context.modelId,
+    revision: context.revision,
+    dayId,
+    source: responseFrames.length
+      ? `Coast · ${responseFrames.length} 个代表画面`
+      : "Coast · 当天没有可用画面",
+    frames: responseFrames,
+  });
+}
+
+async function serveModelRewindFrame(req, res, url) {
+  const context = modelContext(req, res, url, undefined, "evidence:read");
+  requireScope(context.authorization, "rewind:read");
+  const reference = String(url.searchParams.get("reference") || "");
+  const evidence = await evidenceService.getCoastFrame({
+    viewerSessionId: context.sessionId,
+    activeModelId: context.modelId,
+    reference,
+  });
+  const imagePath = secureCoastImagePath(evidence.content?.imagePath);
+  if (!imagePath) {
+    sendJson(res, 404, {
+      ok: false,
+      code: "COAST_FRAME_NOT_FOUND",
+      error: "这个画面已不可用",
+    });
+    return;
+  }
+  const image = await readFile(imagePath);
+  res.writeHead(200, {
+    "Content-Type": "image/png",
+    "Content-Length": image.length,
+    "Cache-Control": "private, max-age=300",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    ...(res.whoamiSetCookie ? { "Set-Cookie": res.whoamiSetCookie } : {}),
+  });
+  res.end(image);
+}
+
 async function bootstrapPersome(res) {
   const bootstrapModelId = ownerProfile?.modelId
     || developmentModelRuntime?.ownerModelId
@@ -2420,17 +2527,39 @@ async function loadLocalOwnerSnapshot(profile) {
       "现在": "present",
       "未来": "future",
     };
+    const nowGeneratedAt = Number.isFinite(Date.parse(live.generatedAt))
+      ? new Date(live.generatedAt).toISOString()
+      : new Date().toISOString();
+    const nowRangeStart = new Date(
+      Date.parse(nowGeneratedAt) - 7 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const nowSourceRefs = [...new Set(
+      days.flatMap((day) => day.events.map((event) => event.evidenceRef)),
+    )].slice(0, 6);
     const nowItems = (Array.isArray(live.nowItems) ? live.nowItems : [])
       .filter((item) => item?.title)
       .slice(0, 6)
-      .map((item, index) => ({
-        id: String(item.id || `${modelId}-now-${index + 1}`),
-        kind: kindMap[item.kind] || "present",
-        title: String(item.title),
-        why: String(item.why || ""),
-        when: String(item.t || item.when || "现在"),
-        ...(item.day ? { dayId: String(item.day) } : {}),
-      }));
+      .map((item, index) => {
+        const kind = kindMap[item.kind] || "present";
+        return {
+          id: String(item.id || `${modelId}-now-${index + 1}`),
+          kind,
+          title: String(item.title),
+          why: String(item.why || ""),
+          when: String(item.t || item.when || "现在"),
+          ...(item.day ? { dayId: String(item.day) } : {}),
+          ...(item.app ? { app: String(item.app) } : {}),
+          metadata: {
+            provenance: kind === "future" ? "generated" : "inferred",
+            ...(nowSourceRefs.length ? { sourceRefs: nowSourceRefs } : {}),
+            timeRange: { start: nowRangeStart, end: nowGeneratedAt },
+            generatedAt: nowGeneratedAt,
+            method: kind === "future"
+              ? "continuation-suggestion from Persome recent_activity / current_context"
+              : "Persome recent_activity / current_context",
+          },
+        };
+      });
     const updatedValue = files
       .map((file) => file.updated)
       .filter((value) => Number.isFinite(Date.parse(value)))
@@ -2738,6 +2867,14 @@ const server = createServer(async (req, res) => {
       }
       if (req.method === "GET" && url.pathname === "/api/model/reports") {
         await serveModelReports(req, res, url);
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/api/model/rewind/frames") {
+        await serveModelRewindFrames(req, res, url);
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/api/model/rewind/frame") {
+        await serveModelRewindFrame(req, res, url);
         return;
       }
       if (req.method === "GET" && url.pathname === "/api/model/evidence") {

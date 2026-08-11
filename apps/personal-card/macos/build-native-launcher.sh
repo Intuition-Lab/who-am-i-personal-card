@@ -8,11 +8,16 @@ unset CDPATH
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_PATH="${SCRIPT_DIR}/WhoAmIApp.swift"
 NATIVE_UI_SOURCE_PATH="${SCRIPT_DIR}/WhoAmINativeUI.swift"
+LIFECYCLE_SOURCE_PATH="${SCRIPT_DIR}/NativeLifecycle.swift"
+LIFECYCLE_HELPER_PATH="${SCRIPT_DIR}/native-lifecycle-helper.sh"
+APP_ICON_SOURCE_DIRECTORY="${SCRIPT_DIR}/../assets/app-icons"
 PRODUCT_ROOT=""
 PERSOME_ROOT=""
 PRODUCT_VERSION=""
 OUTPUT_DIRECTORY="${SCRIPT_DIR}/build"
 SIGN_IDENTITY="-"
+TEAM_ID=""
+ENTITLEMENTS_PATH="${SCRIPT_DIR}/WhoAmI.entitlements"
 BOOTSTRAP_INSTALL=0
 
 usage() {
@@ -27,7 +32,9 @@ usage() {
     '  --persome-root PATH       Owner-local Personal Model root.' \
     '  --bootstrap               Build the DMG first-run installer App.' \
     '  --output-directory PATH   New app output parent (default: macos/build).' \
-    '  --sign-identity ID        codesign identity (default: ad-hoc "-").' \
+    '  --sign-identity ID        Developer ID identity (default: ad-hoc "-").' \
+    '  --team-id TEAMID          Required with a Developer ID identity.' \
+    '  --entitlements PATH       Approved entitlements plist.' \
     '  -h, --help                Show this help.'
 }
 
@@ -71,6 +78,22 @@ while [[ $# -gt 0 ]]; do
         exit 2
       }
       SIGN_IDENTITY="$2"
+      shift 2
+      ;;
+    --team-id)
+      [[ $# -ge 2 ]] || {
+        /usr/bin/printf '%s\n' '--team-id requires a value.' >&2
+        exit 2
+      }
+      TEAM_ID="$2"
+      shift 2
+      ;;
+    --entitlements)
+      [[ $# -ge 2 ]] || {
+        /usr/bin/printf '%s\n' '--entitlements requires a value.' >&2
+        exit 2
+      }
+      ENTITLEMENTS_PATH="$2"
       shift 2
       ;;
     --bootstrap)
@@ -123,10 +146,64 @@ case "${OUTPUT_DIRECTORY}" in
     exit 2
     ;;
 esac
+if [[ "${SIGN_IDENTITY}" == "-" ]]; then
+  if [[ -n "${TEAM_ID}" ]]; then
+    /usr/bin/printf '%s\n' \
+      '--team-id cannot be used with an ad-hoc signature.' >&2
+    exit 2
+  fi
+else
+  if [[ "${SIGN_IDENTITY}" != Developer\ ID\ Application:* \
+    || "${SIGN_IDENTITY}" == *[[:cntrl:]]* ]]; then
+    /usr/bin/printf '%s\n' \
+      'A full Developer ID Application identity name is required.' >&2
+    exit 2
+  fi
+  if [[ ! "${TEAM_ID}" =~ ^[A-Z0-9]{10}$ ]]; then
+    /usr/bin/printf '%s\n' \
+      'Team ID must be exactly 10 uppercase letters or digits.' >&2
+    exit 2
+  fi
+  if [[ ! -f "${ENTITLEMENTS_PATH}" || -L "${ENTITLEMENTS_PATH}" ]]; then
+    /usr/bin/printf '%s\n' \
+      'The approved entitlements plist is missing or unsafe.' >&2
+    exit 2
+  fi
+  /usr/bin/plutil -lint "${ENTITLEMENTS_PATH}" >/dev/null
+fi
 
-for source_file in "${SOURCE_PATH}" "${NATIVE_UI_SOURCE_PATH}"; do
+for source_file in \
+  "${SOURCE_PATH}" \
+  "${NATIVE_UI_SOURCE_PATH}" \
+  "${LIFECYCLE_SOURCE_PATH}" \
+  "${LIFECYCLE_HELPER_PATH}"; do
   if [[ ! -f "${source_file}" || -L "${source_file}" ]]; then
     /usr/bin/printf 'Swift source is missing or unsafe: %s\n' "${source_file}" >&2
+    exit 1
+  fi
+done
+
+APP_ICON_FILES=(
+  chatgpt.png
+  chrome.png
+  claude.png
+  coast.png
+  finder.png
+  lark.png
+  notes.png
+  terminal.png
+  wechat.png
+)
+if [[ ! -d "${APP_ICON_SOURCE_DIRECTORY}" || -L "${APP_ICON_SOURCE_DIRECTORY}" ]]; then
+  /usr/bin/printf 'Native activity icon directory is missing or unsafe: %s\n' \
+    "${APP_ICON_SOURCE_DIRECTORY}" >&2
+  exit 1
+fi
+for icon_file in "${APP_ICON_FILES[@]}"; do
+  icon_path="${APP_ICON_SOURCE_DIRECTORY}/${icon_file}"
+  if [[ ! -f "${icon_path}" || -L "${icon_path}" ]]; then
+    /usr/bin/printf 'Native activity icon is missing or unsafe: %s\n' \
+      "${icon_path}" >&2
     exit 1
   fi
 done
@@ -168,10 +245,20 @@ SWIFTC="$(/usr/bin/xcrun --sdk macosx --find swiftc)"
 STAGING_APP="${TEMPORARY_ROOT}/Who Am I.app"
 CONTENTS="${STAGING_APP}/Contents"
 MACOS_DIRECTORY="${CONTENTS}/MacOS"
-/bin/mkdir -p "${MACOS_DIRECTORY}"
+RESOURCES_DIRECTORY="${CONTENTS}/Resources"
+APP_ICON_RESOURCES_DIRECTORY="${RESOURCES_DIRECTORY}/AppIcons"
+/bin/mkdir -p "${MACOS_DIRECTORY}" "${APP_ICON_RESOURCES_DIRECTORY}"
+
+for icon_file in "${APP_ICON_FILES[@]}"; do
+  /bin/cp "${APP_ICON_SOURCE_DIRECTORY}/${icon_file}" \
+    "${APP_ICON_RESOURCES_DIRECTORY}/${icon_file}"
+  /bin/chmod 0644 "${APP_ICON_RESOURCES_DIRECTORY}/${icon_file}"
+done
+/bin/chmod 0755 "${RESOURCES_DIRECTORY}" "${APP_ICON_RESOURCES_DIRECTORY}"
 
 for architecture in arm64 x86_64; do
   "${SWIFTC}" \
+    -j 4 \
     -sdk "${SDK_PATH}" \
     -target "${architecture}-apple-macos13.0" \
     -Onone \
@@ -179,6 +266,7 @@ for architecture in arm64 x86_64; do
     -framework SwiftUI \
     "${SOURCE_PATH}" \
     "${NATIVE_UI_SOURCE_PATH}" \
+    "${LIFECYCLE_SOURCE_PATH}" \
     -o "${TEMPORARY_ROOT}/WhoAmI-${architecture}"
 done
 
@@ -187,6 +275,9 @@ done
   "${TEMPORARY_ROOT}/WhoAmI-x86_64" \
   -output "${MACOS_DIRECTORY}/WhoAmI"
 /bin/chmod 0755 "${MACOS_DIRECTORY}/WhoAmI"
+/usr/bin/install -m 0644 \
+  "${LIFECYCLE_HELPER_PATH}" \
+  "${RESOURCES_DIRECTORY}/native-lifecycle-helper.sh"
 
 INFO_PLIST="${CONTENTS}/Info.plist"
 /usr/bin/plutil -create xml1 "${INFO_PLIST}"
@@ -213,6 +304,10 @@ esac
   -string "public.app-category.productivity" "${INFO_PLIST}"
 /usr/bin/plutil -insert NSPrincipalClass -string "NSApplication" "${INFO_PLIST}"
 /usr/bin/plutil -insert NSHighResolutionCapable -bool true "${INFO_PLIST}"
+/usr/bin/plutil -insert LSArchitecturePriority -array "${INFO_PLIST}"
+/usr/bin/plutil -insert LSArchitecturePriority.0 -string "arm64" "${INFO_PLIST}"
+/usr/bin/plutil -insert LSArchitecturePriority.1 -string "x86_64" "${INFO_PLIST}"
+/usr/bin/plutil -insert LSRequiresNativeExecution -bool true "${INFO_PLIST}"
 /usr/bin/plutil -insert LSUIElement -bool true "${INFO_PLIST}"
 /usr/bin/plutil -insert LSMultipleInstancesProhibited -bool true "${INFO_PLIST}"
 /usr/bin/plutil -insert NSAppTransportSecurity -dictionary "${INFO_PLIST}"
@@ -243,9 +338,24 @@ else
     --sign "${SIGN_IDENTITY}" \
     --options runtime \
     --timestamp \
+    --entitlements "${ENTITLEMENTS_PATH}" \
     "${STAGING_APP}"
 fi
-/usr/bin/codesign --verify --strict "${STAGING_APP}"
+/usr/bin/codesign --verify --deep --strict "${STAGING_APP}"
+if [[ "${SIGN_IDENTITY}" != "-" ]]; then
+  signature_details="$(
+    /usr/bin/codesign --display --verbose=4 "${STAGING_APP}" 2>&1
+  )"
+  if ! /usr/bin/grep -Fq -- "TeamIdentifier=${TEAM_ID}" \
+    <<<"${signature_details}" \
+    || ! /usr/bin/grep -Fq -- 'Authority=Developer ID Application:' \
+      <<<"${signature_details}" \
+    || ! /usr/bin/grep -Eq 'flags=.*runtime' <<<"${signature_details}"; then
+    /usr/bin/printf '%s\n' \
+      'Developer ID signature identity, Team ID, or hardened runtime is invalid.' >&2
+    exit 1
+  fi
+fi
 /usr/bin/lipo "${MACOS_DIRECTORY}/WhoAmI" -verify_arch arm64 x86_64
 
 /bin/mv "${STAGING_APP}" "${APP_PATH}"

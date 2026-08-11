@@ -79,6 +79,7 @@ export interface PersonalModelNowItem {
   readonly why: string;
   readonly when: string;
   readonly dayId?: string;
+  readonly app?: string;
   readonly metadata?: PersonalModelContentMetadata;
 }
 
