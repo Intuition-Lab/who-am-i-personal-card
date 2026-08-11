@@ -326,6 +326,7 @@ install_personal_card() {
     "${source_root}/src/auth" \
     "${source_root}/src/client" \
     "${source_root}/src/connectors" \
+    "${source_root}/src/content" \
     "${source_root}/src/contracts" \
     "${source_root}/src/evidence" \
     "${source_root}/src/setup" \
