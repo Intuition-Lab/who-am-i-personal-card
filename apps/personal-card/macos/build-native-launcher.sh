@@ -16,6 +16,8 @@ PERSOME_ROOT=""
 PRODUCT_VERSION=""
 OUTPUT_DIRECTORY="${SCRIPT_DIR}/build"
 SIGN_IDENTITY="-"
+TEAM_ID=""
+ENTITLEMENTS_PATH="${SCRIPT_DIR}/WhoAmI.entitlements"
 BOOTSTRAP_INSTALL=0
 
 usage() {
@@ -30,7 +32,9 @@ usage() {
     '  --persome-root PATH       Owner-local Personal Model root.' \
     '  --bootstrap               Build the DMG first-run installer App.' \
     '  --output-directory PATH   New app output parent (default: macos/build).' \
-    '  --sign-identity ID        codesign identity (default: ad-hoc "-").' \
+    '  --sign-identity ID        Developer ID identity (default: ad-hoc "-").' \
+    '  --team-id TEAMID          Required with a Developer ID identity.' \
+    '  --entitlements PATH       Approved entitlements plist.' \
     '  -h, --help                Show this help.'
 }
 
@@ -74,6 +78,22 @@ while [[ $# -gt 0 ]]; do
         exit 2
       }
       SIGN_IDENTITY="$2"
+      shift 2
+      ;;
+    --team-id)
+      [[ $# -ge 2 ]] || {
+        /usr/bin/printf '%s\n' '--team-id requires a value.' >&2
+        exit 2
+      }
+      TEAM_ID="$2"
+      shift 2
+      ;;
+    --entitlements)
+      [[ $# -ge 2 ]] || {
+        /usr/bin/printf '%s\n' '--entitlements requires a value.' >&2
+        exit 2
+      }
+      ENTITLEMENTS_PATH="$2"
       shift 2
       ;;
     --bootstrap)
@@ -126,6 +146,31 @@ case "${OUTPUT_DIRECTORY}" in
     exit 2
     ;;
 esac
+if [[ "${SIGN_IDENTITY}" == "-" ]]; then
+  if [[ -n "${TEAM_ID}" ]]; then
+    /usr/bin/printf '%s\n' \
+      '--team-id cannot be used with an ad-hoc signature.' >&2
+    exit 2
+  fi
+else
+  if [[ "${SIGN_IDENTITY}" != Developer\ ID\ Application:* \
+    || "${SIGN_IDENTITY}" == *[[:cntrl:]]* ]]; then
+    /usr/bin/printf '%s\n' \
+      'A full Developer ID Application identity name is required.' >&2
+    exit 2
+  fi
+  if [[ ! "${TEAM_ID}" =~ ^[A-Z0-9]{10}$ ]]; then
+    /usr/bin/printf '%s\n' \
+      'Team ID must be exactly 10 uppercase letters or digits.' >&2
+    exit 2
+  fi
+  if [[ ! -f "${ENTITLEMENTS_PATH}" || -L "${ENTITLEMENTS_PATH}" ]]; then
+    /usr/bin/printf '%s\n' \
+      'The approved entitlements plist is missing or unsafe.' >&2
+    exit 2
+  fi
+  /usr/bin/plutil -lint "${ENTITLEMENTS_PATH}" >/dev/null
+fi
 
 for source_file in \
   "${SOURCE_PATH}" \
@@ -293,9 +338,24 @@ else
     --sign "${SIGN_IDENTITY}" \
     --options runtime \
     --timestamp \
+    --entitlements "${ENTITLEMENTS_PATH}" \
     "${STAGING_APP}"
 fi
-/usr/bin/codesign --verify --strict "${STAGING_APP}"
+/usr/bin/codesign --verify --deep --strict "${STAGING_APP}"
+if [[ "${SIGN_IDENTITY}" != "-" ]]; then
+  signature_details="$(
+    /usr/bin/codesign --display --verbose=4 "${STAGING_APP}" 2>&1
+  )"
+  if ! /usr/bin/grep -Fq -- "TeamIdentifier=${TEAM_ID}" \
+    <<<"${signature_details}" \
+    || ! /usr/bin/grep -Fq -- 'Authority=Developer ID Application:' \
+      <<<"${signature_details}" \
+    || ! /usr/bin/grep -Eq 'flags=.*runtime' <<<"${signature_details}"; then
+    /usr/bin/printf '%s\n' \
+      'Developer ID signature identity, Team ID, or hardened runtime is invalid.' >&2
+    exit 1
+  fi
+fi
 /usr/bin/lipo "${MACOS_DIRECTORY}/WhoAmI" -verify_arch arm64 x86_64
 
 /bin/mv "${STAGING_APP}" "${APP_PATH}"

@@ -103,9 +103,13 @@ the DMG:
 )
 ```
 
-The DMG entry App and installed application currently receive local ad-hoc
-signatures; they are not Developer ID signed or notarized. macOS may ask the
-user to confirm opening them, and Accessibility and Screen Recording
+The current local candidate is ad-hoc signed. The formal Release workflow is
+Developer ID and notarization ready and fails closed until the protected
+`github-release` Environment contains approved Apple material. The downloaded
+DMG App is then signed and notarized; the owner-specific App generated during
+installation remains ad-hoc signed until the documented path-independent
+launcher follow-up is complete. See `docs/apple-signing-notarization.md`.
+macOS may ask the user to confirm opening an ad-hoc build, and Accessibility and Screen Recording
 permissions must be approved by the signed-in user. On first launch, an
 existing Personal Model connects automatically. A prior Who Am I profile is
 migrated when available; otherwise the macOS account name becomes the initial

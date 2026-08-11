@@ -138,7 +138,16 @@ Create an environment named exactly `github-release`:
   current REST environment schema does not expose this switch, so the setup
   script deliberately reports it as a remaining manual gate;
 - restrict deployment to the release tag policy (`v*`);
-- do not store product or Runtime credentials in this environment.
+- do not store product, Runtime, or Personal Model credentials in this
+  environment. The only release credentials permitted are the repository
+  control private key and the Apple signing/notarization secrets listed in
+  `apple-signing-notarization.md`.
+
+The Release build job is also bound to this Environment because it must access
+the Developer ID certificate and notary API key only after approval. Missing
+Apple material makes the build fail before it creates release assets. See
+`apple-signing-notarization.md` for the exact secrets, non-secret variables,
+temporary Keychain lifecycle, and rotation procedure.
 
 The `publish` job is bound to this name and cannot run before the environment
 gate is satisfied.

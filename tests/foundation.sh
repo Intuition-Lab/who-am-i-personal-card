@@ -2267,6 +2267,80 @@ test_context_hook_rejects_oversized_prompt() {
   [[ ! -e "${install_home}/context-hook-calls.log" ]]
 }
 
+test_apple_release_entitlements_are_minimal() {
+  local entitlements="${PRODUCT_ROOT}/apps/personal-card/macos/WhoAmI.entitlements"
+
+  [[ -f "${entitlements}" && ! -L "${entitlements}" ]]
+  grep -Fq '<dict/>' "${entitlements}"
+  if grep -Fq 'com.apple.security.' "${entitlements}"; then
+    printf '%s\n' 'The release App unexpectedly requests an Apple entitlement.'
+    return 1
+  fi
+}
+
+test_apple_release_signing_fails_closed_without_identity() {
+  assert_rejected_contains \
+    'Release signing requires a Developer ID Application identity.' \
+    bash "${PRODUCT_ROOT}/scripts/build-self-contained-package.sh" \
+      --output-directory "${TEST_CASES}/missing-apple-identity" \
+      --release-signing
+}
+
+test_native_builder_rejects_incomplete_developer_id_configuration() {
+  assert_rejected_contains \
+    'Team ID must be exactly 10 uppercase letters or digits.' \
+    bash "${PRODUCT_ROOT}/apps/personal-card/macos/build-native-launcher.sh" \
+      --bootstrap \
+      --product-version "$(tr -d '[:space:]' < "${PRODUCT_ROOT}/VERSION")" \
+      --output-directory "${TEST_CASES}/native-developer-id-missing-team" \
+      --sign-identity 'Developer ID Application: Example (ABCDEFGHIJ)'
+}
+
+test_notarized_release_wrapper_requires_environment_secrets() {
+  (
+    unset \
+      WHOAMI_APPLE_DEVELOPER_ID_P12_BASE64 \
+      WHOAMI_APPLE_DEVELOPER_ID_P12_PASSWORD \
+      WHOAMI_APPLE_SIGNING_KEYCHAIN_PASSWORD \
+      WHOAMI_APPLE_SIGN_IDENTITY \
+      WHOAMI_APPLE_TEAM_ID \
+      WHOAMI_APPLE_NOTARY_API_KEY_BASE64 \
+      WHOAMI_APPLE_NOTARY_KEY_ID \
+      WHOAMI_APPLE_NOTARY_ISSUER_ID
+    assert_rejected_contains \
+      'Required Apple release environment is missing' \
+      bash "${PRODUCT_ROOT}/scripts/build-notarized-release-assets.sh"
+  )
+}
+
+test_release_workflow_requires_signing_and_notarization() {
+  local workflow="${PRODUCT_ROOT}/.github/workflows/release.yml"
+  local notary_script="${PRODUCT_ROOT}/scripts/notarize-macos-release.sh"
+
+  grep -Fq 'environment: github-release' "${workflow}"
+  grep -Fq 'build-notarized-release-assets.sh' "${workflow}"
+  grep -Fq 'secrets.APPLE_DEVELOPER_ID_P12_BASE64' "${workflow}"
+  grep -Fq 'secrets.APPLE_NOTARY_API_KEY_BASE64' "${workflow}"
+  grep -Fq 'stapler validate' "${workflow}"
+  grep -Fq -- '--keychain-profile' "${notary_script}"
+  if grep -Eq -- '--apple-id|--password' "${notary_script}"; then
+    printf '%s\n' \
+      'The notarization script accepts raw Apple account credentials.'
+    return 1
+  fi
+}
+
+run_case "Apple release entitlements do not expand product privileges" \
+  test_apple_release_entitlements_are_minimal
+run_case "Apple release signing fails closed without an identity" \
+  test_apple_release_signing_fails_closed_without_identity
+run_case "native Developer ID builds require an explicit Team ID" \
+  test_native_builder_rejects_incomplete_developer_id_configuration
+run_case "notarized release wrapper requires every environment secret" \
+  test_notarized_release_wrapper_requires_environment_secrets
+run_case "release workflow requires signing and notarization" \
+  test_release_workflow_requires_signing_and_notarization
+
 run_case "valid Runtime lock loads" test_valid_lock
 run_case "unknown Runtime lock key is rejected" test_unknown_lock_key
 run_case "duplicate Runtime lock key is rejected" test_duplicate_lock_key

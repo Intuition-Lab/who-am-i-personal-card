@@ -16,6 +16,11 @@ COMMIT=""
 SOURCE_REF="HEAD"
 OUTPUT_DIRECTORY=""
 RUNTIME_CHECKOUT=""
+RELEASE_SIGNING=0
+SIGN_IDENTITY=""
+TEAM_ID=""
+NOTARY_KEYCHAIN_PROFILE=""
+SIGNING_KEYCHAIN=""
 
 usage() {
   cat <<'EOF'
@@ -34,6 +39,12 @@ Optional:
   --source-ref GIT_REF  Git commit/ref to validate (default: HEAD).
   --runtime-checkout PATH
                         Reuse an already verified pinned Runtime checkout.
+  --release-signing     Require Developer ID signing and Apple notarization.
+  --sign-identity ID    Developer ID Application identity name.
+  --team-id TEAMID      Apple Developer Team ID.
+  --notary-profile NAME notarytool profile already stored in Keychain.
+  --signing-keychain PATH
+                        Explicit temporary signing/notary keychain.
   -h, --help            Show this help.
 
 The output directory must not already exist. The source ref must resolve to the
@@ -92,6 +103,42 @@ while [[ $# -gt 0 ]]; do
       RUNTIME_CHECKOUT="$2"
       shift 2
       ;;
+    --release-signing)
+      RELEASE_SIGNING=1
+      shift
+      ;;
+    --sign-identity)
+      [[ $# -ge 2 ]] || {
+        printf '%s\n' '--sign-identity requires a value.' >&2
+        exit 2
+      }
+      SIGN_IDENTITY="$2"
+      shift 2
+      ;;
+    --team-id)
+      [[ $# -ge 2 ]] || {
+        printf '%s\n' '--team-id requires a value.' >&2
+        exit 2
+      }
+      TEAM_ID="$2"
+      shift 2
+      ;;
+    --notary-profile)
+      [[ $# -ge 2 ]] || {
+        printf '%s\n' '--notary-profile requires a value.' >&2
+        exit 2
+      }
+      NOTARY_KEYCHAIN_PROFILE="$2"
+      shift 2
+      ;;
+    --signing-keychain)
+      [[ $# -ge 2 ]] || {
+        printf '%s\n' '--signing-keychain requires a value.' >&2
+        exit 2
+      }
+      SIGNING_KEYCHAIN="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -128,6 +175,32 @@ esac
 if [[ -z "${OUTPUT_DIRECTORY}" || "${OUTPUT_DIRECTORY}" == "/" \
   || -e "${OUTPUT_DIRECTORY}" || -L "${OUTPUT_DIRECTORY}" ]]; then
   printf 'Output directory must be a new, non-root path.\n' >&2
+  exit 2
+fi
+if [[ "${RELEASE_SIGNING}" -eq 1 ]]; then
+  if [[ -z "${SIGN_IDENTITY}" || "${SIGN_IDENTITY}" == "-" \
+    || "${SIGN_IDENTITY}" != Developer\ ID\ Application:* \
+    || ! "${TEAM_ID}" =~ ^[A-Z0-9]{10}$ ]]; then
+    printf '%s\n' \
+      'Release assets require a Developer ID identity and valid Team ID.' >&2
+    exit 2
+  fi
+  case "${NOTARY_KEYCHAIN_PROFILE}" in
+    ""|-*|*[!A-Za-z0-9._-]*|*[[:cntrl:]]*)
+      printf '%s\n' \
+        'Release assets require a safe notary Keychain profile name.' >&2
+      exit 2
+      ;;
+  esac
+  if [[ -n "${SIGNING_KEYCHAIN}" \
+    && ( ! -f "${SIGNING_KEYCHAIN}" || -L "${SIGNING_KEYCHAIN}" ) ]]; then
+    printf '%s\n' 'The explicit signing keychain is missing or unsafe.' >&2
+    exit 2
+  fi
+elif [[ -n "${SIGN_IDENTITY}" || -n "${TEAM_ID}" \
+  || -n "${NOTARY_KEYCHAIN_PROFILE}" || -n "${SIGNING_KEYCHAIN}" ]]; then
+  printf '%s\n' \
+    'Signing inputs require the explicit --release-signing mode.' >&2
   exit 2
 fi
 output_parent="${OUTPUT_DIRECTORY%/*}"
@@ -268,6 +341,17 @@ package_build_arguments=(
 if [[ -n "${RUNTIME_CHECKOUT}" ]]; then
   package_build_arguments+=(--runtime-checkout "${RUNTIME_CHECKOUT}")
 fi
+if [[ "${RELEASE_SIGNING}" -eq 1 ]]; then
+  package_build_arguments+=(
+    --release-signing
+    --sign-identity "${SIGN_IDENTITY}"
+    --team-id "${TEAM_ID}"
+    --notary-profile "${NOTARY_KEYCHAIN_PROFILE}"
+  )
+  if [[ -n "${SIGNING_KEYCHAIN}" ]]; then
+    package_build_arguments+=(--signing-keychain "${SIGNING_KEYCHAIN}")
+  fi
+fi
 bash scripts/build-self-contained-package.sh \
   "${package_build_arguments[@]}"
 for package_asset in "${dmg_name}" "${bundle_name}"; do
@@ -333,6 +417,15 @@ runtime_lock_load runtime.lock
   printf 'native_app_entrypoint=Who Am I.app\n'
   printf 'backend_embedded_in_app=true\n'
   printf 'embedded_product_path=Who Am I.app/Contents/Resources/product\n'
+  if [[ "${RELEASE_SIGNING}" -eq 1 ]]; then
+    printf 'apple_signing=developer-id\n'
+    printf 'apple_team_id=%s\n' "${TEAM_ID}"
+    printf 'apple_dmg_notarized=true\n'
+  else
+    printf 'apple_signing=ad-hoc\n'
+    printf 'apple_team_id=none\n'
+    printf 'apple_dmg_notarized=false\n'
+  fi
   printf 'dmg_asset=%s\n' "${dmg_name}"
   printf 'tar_asset=%s\n' "${bundle_name}"
 } > "${OUTPUT_DIRECTORY}/RELEASE-METADATA.txt"
