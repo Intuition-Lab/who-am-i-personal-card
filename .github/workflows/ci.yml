@@ -216,6 +216,25 @@ jobs:
             "${app}/Contents/Info.plist")" = \
             "$(tr -d '[:space:]' < ../../VERSION)"
 
+      - name: Build universal native app launcher
+        shell: bash
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          output_directory="${RUNNER_TEMP}/native-launcher"
+          bash apps/personal-card/macos/build-native-launcher.sh \
+            --product-root "${RUNNER_TEMP}/product-app/${version}" \
+            --persome-root "${RUNNER_TEMP}/persome" \
+            --product-version "${version}" \
+            --output-directory "${output_directory}"
+          app="${output_directory}/Who Am I.app"
+          lipo "${app}/Contents/MacOS/WhoAmI" \
+            -verify_arch arm64 x86_64
+          codesign --verify --strict "${app}"
+          test "$(
+            plutil -extract WhoAmIProductVersion raw -o - \
+              "${app}/Contents/Info.plist"
+          )" = "${version}"
+
           bootstrap_output="${RUNNER_TEMP}/native-bootstrap"
           bash apps/personal-card/macos/build-native-launcher.sh \
             --bootstrap \
