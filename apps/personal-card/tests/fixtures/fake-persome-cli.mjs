@@ -112,6 +112,13 @@ const toolResults = {
       ]
       : [],
   },
+  correct_memory: {
+    ok: true,
+  },
+  remember: {
+    ok: true,
+    memory_id: "fake-jot-memory",
+  },
 };
 
 function modelSnapshotResult(args = {}) {

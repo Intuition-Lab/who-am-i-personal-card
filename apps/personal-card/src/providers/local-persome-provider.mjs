@@ -595,4 +595,27 @@ export class LocalPersomeProvider extends SnapshotBackedPersonalModelProvider {
       },
     });
   }
+
+  async jot(modelId, text, grant, options = {}) {
+    this.assertAvailableModel(modelId);
+    if (typeof this.operations.jot !== "function") {
+      return super.jot(modelId, text, grant, options);
+    }
+
+    try {
+      const result = await this.operations.jot({
+        modelId,
+        text,
+        grant,
+        signal: options.signal,
+      });
+      return freezeCopy({ modelId, result });
+    } catch {
+      throw new PersonalModelProviderError(
+        "LOCAL_OPERATION_FAILED",
+        "The local Personal Model operation failed.",
+        { status: 502 },
+      );
+    }
+  }
 }

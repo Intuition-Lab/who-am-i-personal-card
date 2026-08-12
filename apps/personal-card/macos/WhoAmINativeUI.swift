@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage
 import Foundation
 import SwiftUI
 
@@ -6,6 +7,9 @@ let whoAmIVisualQAOpaque = ProcessInfo.processInfo.environment["WHOAMI_VISUAL_QA
 let whoAmIVisualQAActive =
     ProcessInfo.processInfo.environment["WHOAMI_VISUAL_QA_ACTIVE"] == "1"
     || whoAmIVisualQAOpaque
+let whoAmIVisualQABackground =
+    whoAmIVisualQAActive
+    && ProcessInfo.processInfo.environment["WHOAMI_VISUAL_QA_BACKGROUND"] == "1"
 let whoAmIVisualQASection = ProcessInfo.processInfo.environment["WHOAMI_VISUAL_QA_SECTION"]
 let whoAmIVisualQAPresentation =
     ProcessInfo.processInfo.environment["WHOAMI_VISUAL_QA_PRESENTATION"]
@@ -698,6 +702,7 @@ final class PersonalModelAppState: ObservableObject {
     @Published private(set) var askResponse: AskResponse?
     @Published private(set) var askPhase: NativeRequestPhase = .idle
     @Published private(set) var askErrorMessage: String?
+    @Published private(set) var askIsReflection = false
     @Published private(set) var connectors: [ConnectorSnapshot] = []
     @Published private(set) var connectorErrorMessage: String?
     @Published private(set) var reports: [ReportSnapshot] = []
@@ -719,6 +724,7 @@ final class PersonalModelAppState: ObservableObject {
     private var personalModelStatus: PersonalModelStatus?
     private var loadingRewindDays = Set<String>()
     private var loadingRewindFrameReferences = Set<String>()
+    private var askPromptIndex = 0
 
     init(baseURL: URL) {
         self.baseURL = baseURL
@@ -793,18 +799,23 @@ final class PersonalModelAppState: ObservableObject {
 
     func openRewind(dayID: String?) {
         rewindDayRequest = dayID?.trimmedNonEmpty
+        closeMemorySky()
+        isShareOpen = false
+        if isAskOpen { closeAsk() }
         selectedSection = .rewind
     }
 
     func openMemorySky() {
         memorySkyEvidenceRequest = nil
         isShareOpen = false
+        if isAskOpen { closeAsk() }
         isMemorySkyOpen = true
     }
 
     func openEvidenceSky(_ reference: String) {
         memorySkyEvidenceRequest = reference.trimmedNonEmpty
         isShareOpen = false
+        if isAskOpen { closeAsk() }
         isMemorySkyOpen = true
     }
 
@@ -1028,6 +1039,88 @@ final class PersonalModelAppState: ObservableObject {
         }
     }
 
+    func submitSpotlight() async {
+        let query = searchQuery.trimmedNonEmpty ?? ""
+        guard !query.isEmpty else { return }
+        searchQuery = ""
+
+        let confidingPattern = "(?:我最近|我觉得|我发现|我好像|我有点|我一直|我其实|我想|我不想|我害怕|我担心|我很累|我好累|我很开心|我很难受|我很迷茫|我在纠结|说不上来|不知道为什么)"
+        let questionPattern = "[？?]$|^(?:我)?(?:上周|昨天|今天|之前|什么时候|为什么|怎么|如何|哪里|哪次|有没有|是否|能不能|是什么)"
+        let isConfiding = query.range(
+            of: confidingPattern,
+            options: .regularExpression
+        ) != nil
+        let isQuestion = query.range(
+            of: questionPattern,
+            options: .regularExpression
+        ) != nil
+
+        if !isConfiding || isQuestion {
+            let normalizedQuery = query.folding(
+                options: [.caseInsensitive, .diacriticInsensitive],
+                locale: .current
+            )
+            let matchingDay = snapshot?.time?.days?.first { day in
+                let eventText = (day.events ?? []).map {
+                    [$0.title, $0.detail, $0.app]
+                        .compactMap { $0?.trimmedNonEmpty }
+                        .joined(separator: " ")
+                }
+                let haystack = (
+                    [day.title, day.portrait, day.letter]
+                        .compactMap { $0?.trimmedNonEmpty }
+                    + eventText
+                )
+                    .joined(separator: " ")
+                    .folding(
+                        options: [.caseInsensitive, .diacriticInsensitive],
+                        locale: .current
+                    )
+                return haystack.contains(normalizedQuery)
+            }
+            if let matchingDay {
+                openRewind(dayID: matchingDay.id)
+                return
+            }
+            if !isQuestion {
+                searchQuery = query
+                await search()
+                return
+            }
+        }
+
+        question = query
+        askIsReflection = isConfiding && !isQuestion
+        isAskOpen = true
+        await ask()
+        if askPhase != .failure {
+            question = ""
+        }
+    }
+
+    func submitAsk() async {
+        askIsReflection = false
+        if question.trimmedNonEmpty == nil {
+            let prompts = (snapshot?.now?.items ?? []).filter { item in
+                !item.isFutureLike || item.hasReliableSuggestionSource
+            }
+            if !prompts.isEmpty {
+                let item = prompts[askPromptIndex % prompts.count]
+                answer = [item.displayTitle, item.why?.trimmedNonEmpty]
+                    .compactMap { $0 }
+                    .joined(separator: "——")
+                askPromptIndex = (askPromptIndex + 1) % prompts.count
+            } else {
+                answer = "你的 Personal Model 正在等待新的个人依据。"
+            }
+            askResponse = nil
+            askPhase = .success
+            askErrorMessage = nil
+            return
+        }
+        await ask()
+    }
+
     func ask() async {
         let value = question.trimmedNonEmpty ?? ""
         guard !value.isEmpty else { return }
@@ -1165,7 +1258,18 @@ final class PersonalModelAppState: ObservableObject {
         isShareOpen = false
         shareFact = nil
         closeMemorySky()
+        askIsReflection = false
         isAskOpen = true
+    }
+
+    func closeAsk() {
+        isAskOpen = false
+        question = ""
+        answer = ""
+        askResponse = nil
+        askPhase = .idle
+        askErrorMessage = nil
+        askIsReflection = false
     }
 
     func copyCard() {
@@ -1207,7 +1311,7 @@ final class PersonalModelAppState: ObservableObject {
             return true
         }
         if isAskOpen {
-            isAskOpen = false
+            closeAsk()
             return true
         }
         if selectedSection != .card {
@@ -1220,6 +1324,8 @@ final class PersonalModelAppState: ObservableObject {
     func openShare(highlight: String? = nil) {
         shareFact = nil
         shareHighlight = highlight?.trimmedNonEmpty
+        closeMemorySky()
+        if isAskOpen { closeAsk() }
         isShareOpen = true
     }
 
@@ -1289,9 +1395,17 @@ final class PersonalModelAppState: ObservableObject {
 
 struct WhoAmIRootView: View {
     @StateObject private var state: PersonalModelAppState
+    @State private var showsOpeningDossier: Bool
 
     init(state: PersonalModelAppState) {
         _state = StateObject(wrappedValue: state)
+        _showsOpeningDossier = State(
+            initialValue: state.selectedSection == .card
+                && (
+                    !whoAmIVisualQAActive
+                        || whoAmIVisualQAPresentation == "opening"
+                )
+        )
     }
 
     var body: some View {
@@ -1315,18 +1429,23 @@ struct WhoAmIRootView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .blur(radius: state.isAskOpen ? 12 : 0)
             .zIndex(state.selectedSection == .connectors ? 30 : 0)
             .allowsHitTesting(
                 !state.isMemorySkyOpen
                     && !state.isShareOpen
+                    && !state.isAskOpen
                     && state.shareFact == nil
                     && !state.hasEvidencePresentation
+                    && !showsOpeningDossier
             )
             .accessibilityHidden(
                 state.isMemorySkyOpen
                     || state.isShareOpen
+                    || state.isAskOpen
                     || state.shareFact != nil
                     || state.hasEvidencePresentation
+                    || showsOpeningDossier
             )
             if state.selectedSection != .card
                 && state.selectedSection != .connectors
@@ -1354,6 +1473,10 @@ struct WhoAmIRootView: View {
                 NativeEvidencePresentation(state: state)
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
+            if let snapshot = state.snapshot, state.isAskOpen {
+                NativeAskOverlay(state: state, snapshot: snapshot)
+                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
+            }
             if let message = state.correctionMessage {
                 NativeCorrectionToast(
                     message: message,
@@ -1367,6 +1490,13 @@ struct WhoAmIRootView: View {
                     try? await Task.sleep(nanoseconds: 3_200_000_000)
                     state.resetCorrectionStatus()
                 }
+            }
+            if let snapshot = state.snapshot, showsOpeningDossier {
+                NativeOpeningDossier(snapshot: snapshot) {
+                    showsOpeningDossier = false
+                }
+                .transition(.opacity)
+                .zIndex(200)
             }
         }
         .frame(minWidth: 900, minHeight: 640)
@@ -1429,6 +1559,9 @@ private struct NativeAppTopBar: View {
 
             HStack(spacing: 16) {
                 Button {
+                    state.closeMemorySky()
+                    state.isShareOpen = false
+                    if state.isAskOpen { state.closeAsk() }
                     state.selectedSection = .card
                     isMenuOpen = false
                 } label: {
@@ -1541,6 +1674,8 @@ private struct NativeAppTopMenu: View {
             }
             NativeTopMenuItem(symbol: "⌁", title: "继续工作") {
                 close()
+                state.closeMemorySky()
+                if state.isAskOpen { state.closeAsk() }
                 state.selectedSection = .connectors
             }
             NativeTopMenuItem(symbol: "↗", title: "分享这张卡") {
@@ -1626,7 +1761,22 @@ private struct WhoAmIBackground: View {
     var body: some View {
         if whoAmIVisualQAOpaque {
             GeometryReader { geometry in
-                let radius = max(geometry.size.width, geometry.size.height)
+                let width = geometry.size.width
+                let height = geometry.size.height
+                let angle = 200.0 * Double.pi / 180.0
+                let directionX = CGFloat(sin(angle))
+                let directionY = CGFloat(-cos(angle))
+                let gradientLength = abs(width * directionX) + abs(height * directionY)
+                let halfLength = gradientLength / 2
+                let startPoint = UnitPoint(
+                    x: (width / 2 - directionX * halfLength) / width,
+                    y: (height / 2 - directionY * halfLength) / height
+                )
+                let endPoint = UnitPoint(
+                    x: (width / 2 + directionX * halfLength) / width,
+                    y: (height / 2 + directionY * halfLength) / height
+                )
+                let shadowColor = Color(red: 60 / 255, green: 70 / 255, blue: 95 / 255)
                 ZStack {
                     LinearGradient(
                         gradient: Gradient(stops: [
@@ -1635,38 +1785,123 @@ private struct WhoAmIBackground: View {
                             .init(color: nativeHexColor("#C9BEB0"), location: 0.68),
                             .init(color: nativeHexColor("#E4DDD2"), location: 1),
                         ]),
-                        startPoint: UnitPoint(x: 0.67, y: 0),
-                        endPoint: UnitPoint(x: 0.33, y: 1)
+                        startPoint: startPoint,
+                        endPoint: endPoint
                     )
                     RadialGradient(
                         gradient: Gradient(stops: [
                             .init(color: .white.opacity(0.34), location: 0),
-                            .init(color: .clear, location: 0.55),
+                            .init(color: .white.opacity(0), location: 0.55),
                         ]),
-                        center: UnitPoint(x: 0.78, y: 0.08),
+                        center: .center,
                         startRadius: 0,
-                        endRadius: radius * 0.86
+                        endRadius: 1
                     )
+                    .frame(width: 2, height: 2)
+                    .scaleEffect(x: width * 1.20, y: height * 0.80)
+                    .position(x: width * 0.78, y: height * 0.08)
                     RadialGradient(
                         gradient: Gradient(stops: [
-                            .init(
-                                color: Color(red: 60 / 255, green: 70 / 255, blue: 95 / 255)
-                                    .opacity(0.22),
-                                location: 0
-                            ),
-                            .init(color: .clear, location: 0.60),
+                            .init(color: shadowColor.opacity(0.22), location: 0),
+                            .init(color: shadowColor.opacity(0), location: 0.60),
                         ]),
-                        center: UnitPoint(x: 0.12, y: 0.92),
+                        center: .center,
                         startRadius: 0,
-                        endRadius: radius * 0.70
+                        endRadius: 1
                     )
+                    .frame(width: 2, height: 2)
+                    .scaleEffect(x: width * 0.90, y: height * 0.70)
+                    .position(x: width * 0.12, y: height * 0.92)
                 }
-                .frame(width: geometry.size.width, height: geometry.size.height)
+                .frame(width: width, height: height)
+                .clipped()
             }
             .ignoresSafeArea()
         } else {
             Color.clear.ignoresSafeArea()
         }
+    }
+}
+
+/// Renders the final (non-inset) CSS `box-shadow` term without changing the
+/// layout of the view it sits behind. CSS blur radii are diameters, while the
+/// Core Graphics blur filter uses a radius, so callers pass half of the CSS
+/// blur value. Keeping the spread in the source geometry is important here:
+/// SwiftUI's regular `.shadow` cannot express the large negative spread used
+/// by the reference Card and Spotlight surfaces.
+private struct NativeCSSBoxShadow: View {
+    let boxSize: CGSize
+    let cornerRadius: CGFloat
+    let color: Color
+    let blurRadius: CGFloat
+    let spread: CGFloat
+    let offset: CGSize
+
+    private var canvasSize: CGSize {
+        let horizontalRoom = blurRadius * 3 + abs(spread) + abs(offset.width)
+        let verticalRoom = blurRadius * 3 + abs(spread) + abs(offset.height)
+        return CGSize(
+            width: boxSize.width + horizontalRoom * 2,
+            height: boxSize.height + verticalRoom * 2
+        )
+    }
+
+    var body: some View {
+        Canvas(rendersAsynchronously: false) { context, size in
+            context.addFilter(.blur(radius: blurRadius, options: [.dithersResult]))
+            let width = max(0, boxSize.width + spread * 2)
+            let height = max(0, boxSize.height + spread * 2)
+            let rect = CGRect(
+                x: (size.width - width) / 2 + offset.width,
+                y: (size.height - height) / 2 + offset.height,
+                width: width,
+                height: height
+            )
+            let radius = max(0, cornerRadius + spread)
+            context.fill(
+                Path(roundedRect: rect, cornerRadius: radius),
+                with: .color(color)
+            )
+        }
+        .frame(width: canvasSize.width, height: canvasSize.height)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// AppKit exposes a live background-filtering primitive. This keeps the
+/// desktop/background visible through the Spotlight surface while matching the
+/// reference blur and saturation instead of substituting another material.
+private struct NativeBackdropFilter: NSViewRepresentable {
+    let cornerRadius: CGFloat
+    let blurRadius: CGFloat
+    let saturation: CGFloat
+    let backgroundColor: NSColor
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        view.wantsLayer = true
+        view.layerUsesCoreImageFilters = true
+        configure(view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        configure(nsView)
+    }
+
+    private func configure(_ view: NSView) {
+        guard let layer = view.layer else { return }
+        layer.cornerRadius = cornerRadius
+        layer.cornerCurve = .continuous
+        layer.masksToBounds = true
+        layer.backgroundColor = backgroundColor.cgColor
+
+        let blur = CIFilter(name: "CIGaussianBlur")
+        blur?.setValue(blurRadius, forKey: kCIInputRadiusKey)
+        let color = CIFilter(name: "CIColorControls")
+        color?.setValue(saturation, forKey: kCIInputSaturationKey)
+        layer.backgroundFilters = [blur, color].compactMap { $0 }
     }
 }
 
@@ -1871,8 +2106,8 @@ private struct NativeCardHome: View {
                     }
                     Spacer(minLength: 0)
                 }
-                .padding(.top, 28)
-                .padding(.bottom, 44)
+                .padding(.top, 41)
+                .padding(.bottom, 31)
                 .frame(minHeight: geometry.size.height)
                 .frame(maxWidth: 620)
                 .frame(maxWidth: .infinity)
@@ -1942,6 +2177,194 @@ private struct NativeCardMaterial {
     }
 }
 
+/// The original V5 opens as a closed Personal Model dossier before revealing
+/// the Card workspace. Keep this as a real native transition instead of
+/// skipping straight to the post-open dashboard.
+private struct NativeOpeningDossier: View {
+    let snapshot: PersonalModelSnapshot
+    let dismiss: () -> Void
+
+    @State private var isOpening = false
+
+    private var material: NativeCardMaterial {
+        NativeCardMaterial.resolve(snapshot.card?.material)
+    }
+
+    private var glyph: [Bool] {
+        let source = snapshot.card?.glyph ?? []
+        return source.count == 25 ? source : Array(repeating: true, count: 25)
+    }
+
+    var body: some View {
+        ZStack {
+            nativeHexColor("#F1EFE9")
+
+            Text("WHO AM I")
+                .font(.system(size: 11, design: .monospaced))
+                .tracking(5.5)
+                .foregroundStyle(nativeHexColor("#A9A69E"))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.top, 58)
+
+            VStack(spacing: 0) {
+                dossier
+                Text("tap to open")
+                    .font(.system(size: 13))
+                    .tracking(0.52)
+                    .foregroundStyle(nativeHexColor("#8D8A83"))
+                    .padding(.top, 48)
+                    .opacity(isOpening ? 0 : 1)
+                    .animation(
+                        .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+                        value: isOpening
+                    )
+            }
+        }
+        .opacity(isOpening ? 0 : 1)
+        .animation(.easeOut(duration: 0.8).delay(0.35), value: isOpening)
+        .contentShape(Rectangle())
+        .onTapGesture { open() }
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("Open \(snapshot.model.displayName) Personal Card")
+        .accessibilityHint("Opens the Personal Card workspace")
+        .accessibilityAction { open() }
+    }
+
+    private var dossier: some View {
+        ZStack {
+            innerCard
+                .padding(14)
+                .offset(y: isOpening ? -24 : 0)
+                .scaleEffect(isOpening ? 1.04 : 1)
+                .animation(
+                    .spring(response: 1.0, dampingFraction: 0.78).delay(0.5),
+                    value: isOpening
+                )
+
+            cover
+                .rotation3DEffect(
+                    .degrees(isOpening ? -164 : 0),
+                    axis: (x: 0, y: 1, z: 0),
+                    anchor: .leading,
+                    perspective: 0.42
+                )
+                .opacity(isOpening ? 0 : 1)
+                .animation(
+                    .timingCurve(0.5, 0.05, 0.2, 1, duration: 1.3),
+                    value: isOpening
+                )
+        }
+        .frame(width: 290, height: 388)
+    }
+
+    private var cover: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [material.top, material.bottom],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0.30),
+                            .init(
+                                color: .white.opacity(material.isLight ? 0.24 : 0.05),
+                                location: 0.42
+                            ),
+                            .init(color: .clear, location: 0.56),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(
+                    material.isLight
+                        ? Color.black.opacity(0.06)
+                        : Color.white.opacity(0.08),
+                    lineWidth: 1
+                )
+
+            VStack(alignment: .leading) {
+                Text("✳")
+                    .font(.system(size: 24, weight: .regular))
+                    .foregroundStyle(material.detail)
+                Spacer()
+                HStack(alignment: .bottom) {
+                    Text("№ \(snapshot.model.memberNumber ?? "001")")
+                    Spacer()
+                    Text(
+                        verbatim: "SINCE \(String(snapshot.model.sinceYear ?? 2026))"
+                    )
+                }
+                .font(.system(size: 9, design: .monospaced))
+                .tracking(1.98)
+                .foregroundStyle(material.detail.opacity(0.72))
+            }
+            .padding(26)
+        }
+        .shadow(color: .black.opacity(0.24), radius: 24, y: 22)
+    }
+
+    private var innerCard: some View {
+        VStack(spacing: 10) {
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.fixed(7), spacing: 2), count: 5),
+                spacing: 2
+            ) {
+                ForEach(Array(glyph.enumerated()), id: \.offset) { _, isOn in
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(isOn ? nativeHexColor("#F5F5F4") : nativeHexColor("#2C2C2E"))
+                        .frame(width: 7, height: 7)
+                }
+            }
+            .padding(7)
+            .frame(width: 59, height: 59)
+            .background(nativeHexColor("#161618"), in: RoundedRectangle(cornerRadius: 12))
+
+            Text(snapshot.model.displayName)
+                .font(.system(size: 19, weight: .semibold))
+                .tracking(-0.19)
+                .foregroundStyle(nativeHexColor("#1D1D1F"))
+
+            Text(snapshot.card?.tagline ?? "Personal Model")
+                .font(.system(size: 12.5))
+                .foregroundStyle(nativeHexColor("#6E6E73"))
+                .multilineTextAlignment(.center)
+
+            Text(
+                "member № \(snapshot.model.memberNumber ?? "001") · since \(snapshot.model.sinceYear ?? 2026)"
+            )
+            .font(.system(size: 10, design: .monospaced))
+            .tracking(0.8)
+            .foregroundStyle(nativeHexColor("#AEAEB2"))
+        }
+        .padding(26)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(nativeHexColor("#FEFEFD"), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(nativeHexColor("#ECECEA"), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.16), radius: 25, y: 20)
+    }
+
+    private func open() {
+        guard !isOpening else { return }
+        isOpening = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_150_000_000)
+            dismiss()
+        }
+    }
+}
+
 private struct NativeCardStar: Identifiable {
     let id: Int
     let x: Double
@@ -1953,15 +2376,45 @@ private struct NativeCardStar: Identifiable {
     var isBright: Bool { size > 2 }
 }
 
+private struct NativeGuideRing: View {
+    @State private var startedAt = Date()
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1 / 60)) { timeline in
+            let elapsed = max(0, timeline.date.timeIntervalSince(startedAt))
+                .truncatingRemainder(dividingBy: 2.2)
+            let linear = min(1, elapsed / 1.54)
+            let eased = 1 - pow(1 - linear, 3)
+            Circle()
+                .stroke(nativeHexColor("#8FA6FF"), lineWidth: 1.2)
+                .frame(width: 34, height: 34)
+                .shadow(
+                    color: nativeHexColor("#8FA6FF").opacity(0.40),
+                    radius: 8
+                )
+                .scaleEffect(0.55 + 0.95 * CGFloat(eased))
+                .opacity(elapsed < 1.54 ? 0.9 * (1 - eased) : 0)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 private struct NativeHeroCard: View {
     @ObservedObject var state: PersonalModelAppState
     let snapshot: PersonalModelSnapshot
-    @State private var flipped = false
+    @State private var flipped =
+        whoAmIVisualQAActive
+        && whoAmIVisualQAPresentation?.hasPrefix("card-back") == true
     @State private var drag = CGSize.zero
     @State private var hoverLocation: CGPoint?
     @State private var correction = ""
     @State private var selectedFaceID: String?
-    @State private var rootSelected = false
+    @State private var rootSelected =
+        whoAmIVisualQAActive && whoAmIVisualQAPresentation == "card-back-root"
+    @State private var guideDone =
+        whoAmIVisualQAActive
+        && ["card-back-root", "card-back-face"].contains(whoAmIVisualQAPresentation ?? "")
 
     private var glyph: [Bool] {
         let source = snapshot.card?.glyph ?? []
@@ -2035,6 +2488,15 @@ private struct NativeHeroCard: View {
         return "ONE OF ONE\nLOCAL · \(snapshot.model.id.suffix(8))"
     }
 
+    private var cardMemoryCountLabel: String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.groupingSeparator = ","
+        return formatter.string(
+            from: NSNumber(value: snapshot.personalModel?.memoryCount ?? 0)
+        ) ?? String(snapshot.personalModel?.memoryCount ?? 0)
+    }
+
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -2042,10 +2504,10 @@ private struct NativeHeroCard: View {
                     LinearGradient(
                         colors: [material.top, material.bottom],
                         startPoint: materialKey == "graphite"
-                            ? UnitPoint(x: 0.71, y: 0)
+                            ? UnitPoint(x: 0.2899458868, y: -0.2144335241)
                             : .topLeading,
                         endPoint: materialKey == "graphite"
-                            ? UnitPoint(x: 0.29, y: 1)
+                            ? UnitPoint(x: 0.7100541132, y: 1.2144335241)
                             : .bottomTrailing
                     )
                 )
@@ -2061,7 +2523,7 @@ private struct NativeHeroCard: View {
                         ],
                         center: UnitPoint(x: 0.18, y: -0.10),
                         startRadius: 0,
-                        endRadius: materialKey == "graphite" ? 224 : 275
+                        endRadius: materialKey == "graphite" ? 199 : 275
                     )
                 )
             RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -2082,10 +2544,10 @@ private struct NativeHeroCard: View {
                             ),
                         ],
                         startPoint: materialKey == "graphite"
-                            ? UnitPoint(x: 0, y: 0.27)
+                            ? UnitPoint(x: -0.0314479180, y: 0.1069602807)
                             : .topLeading,
                         endPoint: materialKey == "graphite"
-                            ? UnitPoint(x: 1, y: 0.73)
+                            ? UnitPoint(x: 1.0314479180, y: 0.8930397193)
                             : .bottomTrailing
                     )
                 )
@@ -2105,19 +2567,26 @@ private struct NativeHeroCard: View {
                 .allowsHitTesting(!flipped)
                 .accessibilityHidden(flipped)
             back
+                .frame(width: 430, height: 430 / 1.586)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .opacity(flipped ? 1 : 0)
                 .rotation3DEffect(.degrees(flipped ? 0 : -180), axis: (x: 0, y: 1, z: 0))
                 .allowsHitTesting(flipped)
                 .accessibilityHidden(!flipped)
         }
         .frame(width: 430, height: 430 / 1.586)
-        .shadow(
-            color: materialKey == "klein"
-                ? Color(red: 0.12, green: 0.20, blue: 0.72).opacity(0.42)
-                : Color.black.opacity(material.isLight ? 0.20 : 0.42),
-            radius: 34,
-            y: 25
-        )
+        .background {
+            NativeCSSBoxShadow(
+                boxSize: CGSize(width: 430, height: 430 / 1.586),
+                cornerRadius: 20,
+                color: materialKey == "klein"
+                    ? Color(red: 0.12, green: 0.20, blue: 0.72).opacity(0.55)
+                    : Color.black.opacity(material.isLight ? 0.37 : 0.65),
+                blurRadius: 60,
+                spread: -24,
+                offset: CGSize(width: 0, height: 38)
+            )
+        }
         .rotation3DEffect(
             .degrees(Double(drag.width / 45) + hoverTiltY),
             axis: (x: -drag.height / 80, y: 1, z: 0),
@@ -2132,6 +2601,11 @@ private struct NativeHeroCard: View {
         .animation(.spring(response: 0.46, dampingFraction: 0.82), value: flipped)
         .animation(.interactiveSpring(), value: drag)
         .animation(.easeOut(duration: 0.18), value: hoverLocation)
+        .task {
+            if whoAmIVisualQAPresentation == "card-back-face" {
+                selectedFaceID = snapshot.personalModel?.faces?.first?.id
+            }
+        }
         .onContinuousHover { phase in
             switch phase {
             case .active(let point): hoverLocation = point
@@ -2148,9 +2622,11 @@ private struct NativeHeroCard: View {
             case .left, .up:
                 selectedFaceID = faces[(current - 1 + faces.count) % faces.count].id
                 rootSelected = false
+                guideDone = true
             case .right, .down:
                 selectedFaceID = faces[(current + 1) % faces.count].id
                 rootSelected = false
+                guideDone = true
             default:
                 break
             }
@@ -2166,30 +2642,32 @@ private struct NativeHeroCard: View {
                     Text(snapshot.card?.monthYear ?? "AS OF NOW")
                 }
                 .font(.system(size: 8.5, design: .monospaced))
-                .tracking(2.2)
+                .tracking(1.92)
                 .foregroundStyle(material.corner)
                 Spacer()
                 HStack(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: 5.5) {
+                    VStack(alignment: .leading, spacing: 6) {
                         Text("IDENTITY")
                             .foregroundStyle(material.corner)
                         Text("PERSONAL MODEL")
                             .fontWeight(.medium)
                             .foregroundStyle(material.detail)
                     }
+                    .offset(y: 0.5)
                     Spacer()
                     let locatorLines = cardLocator.components(separatedBy: "\n")
-                    VStack(alignment: .trailing, spacing: 5.5) {
+                    VStack(alignment: .trailing, spacing: 6) {
                         Text(locatorLines.first ?? "ONE OF ONE")
                             .foregroundStyle(material.corner)
                         Text(locatorLines.dropFirst().first ?? "")
                             .fontWeight(.medium)
                             .foregroundStyle(material.detail)
                     }
+                        .offset(y: 0.5)
                         .multilineTextAlignment(.trailing)
                 }
                 .font(.system(size: 8.5, design: .monospaced))
-                .tracking(1.4)
+                .tracking(1.36)
             }
             VStack(spacing: 17) {
                 LazyVGrid(
@@ -2226,7 +2704,8 @@ private struct NativeHeroCard: View {
                 .allowsHitTesting(false)
         }
         .padding(.horizontal, 30)
-        .padding(.vertical, 24)
+        .padding(.top, 24)
+        .padding(.bottom, 28)
         .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .onTapGesture { flipped = true }
         .simultaneousGesture(cardGesture)
@@ -2238,13 +2717,14 @@ private struct NativeHeroCard: View {
     }
 
     private var back: some View {
-        GeometryReader { proxy in
-            ZStack {
+        let cardWidth: CGFloat = 430
+        let cardHeight: CGFloat = 430 / 1.586
+        return ZStack {
                 Canvas { context, size in
                     for star in cardStars where !star.isBright {
                         let point = CGPoint(
-                            x: size.width * star.x / 100,
-                            y: size.height * star.y / 100
+                            x: size.width * star.x / 100 + star.size / 2,
+                            y: size.height * star.y / 100 + star.size / 2
                         )
                         let rect = CGRect(
                             x: point.x - star.size / 2,
@@ -2263,37 +2743,50 @@ private struct NativeHeroCard: View {
                 let faces = snapshot.personalModel?.faces ?? []
                 ForEach(cardStars.filter(\.isBright)) { star in
                     let face = faces.isEmpty ? nil : faces[star.id % faces.count]
+                    let starTint = star.isBlue
+                        ? nativeHexColor("#8FA6FF")
+                        : nativeHexColor("#F5F5F4")
                     Button {
                         guard let face else { return }
                         withAnimation(.easeOut(duration: 0.18)) {
                             selectedFaceID = selectedFaceID == face.id ? nil : face.id
                             rootSelected = false
+                            guideDone = true
                         }
                     } label: {
                         Circle()
                             .fill(
                                 RadialGradient(
-                                    colors: [
-                                        star.isBlue
-                                            ? Color(red: 0.56, green: 0.65, blue: 1.0)
-                                            : material.detail,
-                                        (star.isBlue
-                                            ? Color(red: 0.56, green: 0.65, blue: 1.0)
-                                            : material.detail).opacity(0.42),
-                                        .clear,
+                                    stops: [
+                                        .init(color: starTint, location: 0),
+                                        .init(color: starTint, location: 0.20),
+                                        .init(color: starTint.opacity(0.42), location: 0.3111),
+                                        .init(color: starTint.opacity(0.10), location: 0.6667),
+                                        .init(color: .clear, location: 1),
                                     ],
                                     center: .center,
-                                    startRadius: 1.8,
+                                    startRadius: 0,
                                     endRadius: 9
                                 )
                             )
                             .frame(width: 20, height: 20)
+                            .overlay {
+                                if selectedFaceID == face?.id {
+                                    Circle().stroke(starTint.opacity(0.55), lineWidth: 1)
+                                }
+                            }
+                            .shadow(
+                                color: selectedFaceID == face?.id
+                                    ? starTint.opacity(0.35)
+                                    : .clear,
+                                radius: 7
+                            )
                             .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
                     .position(
-                        x: proxy.size.width * star.x / 100,
-                        y: proxy.size.height * star.y / 100
+                        x: cardWidth * star.x / 100 + 3,
+                        y: cardHeight * star.y / 100 + 3
                     )
                     .disabled(face == nil)
                     .accessibilityLabel(
@@ -2305,22 +2798,39 @@ private struct NativeHeroCard: View {
                     withAnimation(.easeOut(duration: 0.18)) {
                         rootSelected.toggle()
                         selectedFaceID = nil
+                        guideDone = true
                     }
                 } label: {
                     Circle()
                         .fill(
                             RadialGradient(
-                                colors: [.white, .blue.opacity(0.65), .clear],
+                                stops: [
+                                    .init(color: nativeHexColor("#8FA6FF"), location: 0),
+                                    .init(color: nativeHexColor("#8FA6FF"), location: 0.25),
+                                    .init(color: nativeHexColor("#8FA6FF").opacity(0.35), location: 0.40),
+                                    .init(color: nativeHexColor("#8FA6FF").opacity(0.12), location: 0.70),
+                                    .init(color: .clear, location: 1),
+                                ],
                                 center: .center,
-                                startRadius: 1,
-                                endRadius: 14
+                                startRadius: 0,
+                                endRadius: 10
                             )
                         )
                         .frame(width: 22, height: 22)
+                        .shadow(
+                            color: rootSelected
+                                ? nativeHexColor("#8FA6FF").opacity(0.35)
+                                : .clear,
+                            radius: 7
+                        )
                 }
                 .buttonStyle(.plain)
-                .position(x: proxy.size.width * 0.5, y: proxy.size.height * 0.44)
+                .position(x: cardWidth * 0.5, y: cardHeight * 0.44)
                 .accessibilityLabel("ROOT · 我是谁")
+                if flipped && !guideDone {
+                    NativeGuideRing()
+                        .position(x: cardWidth * 0.5, y: cardHeight * 0.44)
+                }
 
                 VStack {
                     HStack {
@@ -2343,38 +2853,61 @@ private struct NativeHeroCard: View {
                     .foregroundStyle(material.corner)
                     Spacer()
                     if rootSelected {
-                        VStack(alignment: .leading, spacing: 7) {
+                        VStack(alignment: .leading, spacing: 0) {
                             HStack {
                                 Text("ROOT · 我是谁")
-                                    .font(.system(size: 7.5, design: .monospaced))
-                                    .tracking(1.6)
+                                    .font(.system(size: 8.5, design: .monospaced))
+                                    .tracking(2.7)
                                     .foregroundStyle(material.corner)
                                 Spacer()
                                 Text("← → 巡星")
-                                    .font(.system(size: 7.5, design: .monospaced))
+                                    .font(.system(size: 8.5, design: .monospaced))
+                                    .tracking(0.5)
                                     .foregroundStyle(material.corner)
-                                Button { rootSelected = false } label: { Image(systemName: "xmark") }
+                                Button("×") { rootSelected = false }
                                     .buttonStyle(.plain)
+                                    .font(.system(size: 13))
+                            }
+                            .padding(.bottom, 8)
+                            .overlay(alignment: .bottom) {
+                                Rectangle()
+                                    .fill(material.isLight ? Color.black.opacity(0.08) : Color.white.opacity(0.10))
+                                    .frame(height: 1)
                             }
                             Text(snapshot.personalModel?.root?.trimmedNonEmpty ?? "Personal Model 正在形成对你的长期理解。")
-                                .font(.system(size: 13.5, design: .serif))
-                                .lineSpacing(4)
+                                .font(.custom("Iowan Old Style", size: 13.5))
+                                .lineSpacing(9.5)
                                 .foregroundStyle(material.isLight ? Color.black.opacity(0.88) : Color.white.opacity(0.92))
+                                .frame(minHeight: 25.65, alignment: .topLeading)
+                                .padding(.top, 11)
                                 .lineLimit(3)
                             HStack(spacing: 10) {
-                                Text("Personal Model · 当前快照")
+                                Text("Persome · 当前快照 · root_live · Persome · 由全部 \(cardMemoryCountLabel) 条记忆推出")
+                                    .lineLimit(1)
                                 Spacer()
+                                Button("出处") {
+                                    rootSelected = false
+                                    flipped = false
+                                    state.openRewind(dayID: snapshot.time?.days?.first?.id)
+                                }
                                 Button("改写") {
                                     correction = snapshot.personalModel?.root?.trimmedNonEmpty ?? ""
                                 }
                                 Button("行动") { state.selectedSection = .connectors }
                                 Button("分享 ↗") {
-                                    state.openShare(highlight: snapshot.personalModel?.root)
+                                    let root = snapshot.personalModel?.root?.trimmedNonEmpty
+                                        ?? "Personal Model 正在形成对你的长期理解。"
+                                    state.openFactShare(
+                                        kind: "ROOT",
+                                        text: root,
+                                        meta: "root_live · 由全部 \(cardMemoryCountLabel) 条记忆推出"
+                                    )
                                 }
                             }
                             .buttonStyle(.plain)
-                            .font(.system(size: 8.5, design: .monospaced))
-                            .foregroundStyle(material.isLight ? Color.black.opacity(0.52) : Color.white.opacity(0.52))
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(material.corner)
+                            .padding(.top, 12)
                             if !correction.isEmpty {
                                 HStack(spacing: 7) {
                                     TextField("不对的话，改写它", text: $correction)
@@ -2393,52 +2926,84 @@ private struct NativeHeroCard: View {
                                     material.isLight ? Color.black.opacity(0.06) : Color.white.opacity(0.08),
                                     in: RoundedRectangle(cornerRadius: 7)
                                 )
+                                .padding(.top, 9)
                             }
                         }
-                        .padding(13)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .frame(width: 394)
                         .background(
-                            material.isLight ? Color.white.opacity(0.88) : Color.black.opacity(0.72),
-                            in: RoundedRectangle(cornerRadius: 12)
+                            material.isLight
+                                ? Color.white.opacity(0.94)
+                                : Color(red: 10 / 255, green: 10 / 255, blue: 12 / 255).opacity(0.94),
+                            in: RoundedRectangle(cornerRadius: 11)
                         )
                         .overlay(
-                            RoundedRectangle(cornerRadius: 12)
+                            RoundedRectangle(cornerRadius: 11)
                                 .stroke(material.isLight ? Color.black.opacity(0.08) : Color.white.opacity(0.11))
                         )
+                        .offset(y: 4)
                     }
                     if let selectedFace = (snapshot.personalModel?.faces ?? []).first(where: { $0.id == selectedFaceID }) {
-                        VStack(alignment: .leading, spacing: 7) {
+                        VStack(alignment: .leading, spacing: 0) {
                             HStack {
                                 Text("PERSONAL MODEL · INFERENCE")
-                                    .font(.system(size: 7.5, design: .monospaced))
-                                    .tracking(1.6)
+                                    .font(.system(size: 8.5, design: .monospaced))
+                                    .tracking(2.7)
                                 .foregroundStyle(material.corner)
                                 Spacer()
                                 Text("← → 巡星")
-                                    .font(.system(size: 7.5, design: .monospaced))
+                                    .font(.system(size: 8.5, design: .monospaced))
+                                    .tracking(0.5)
                                     .foregroundStyle(material.corner)
-                                Button { selectedFaceID = nil } label: { Image(systemName: "xmark") }
+                                Button("×") { selectedFaceID = nil }
                                     .buttonStyle(.plain)
+                                    .font(.system(size: 13))
+                            }
+                            .padding(.bottom, 8)
+                            .overlay(alignment: .bottom) {
+                                Rectangle()
+                                    .fill(material.isLight ? Color.black.opacity(0.08) : Color.white.opacity(0.10))
+                                    .frame(height: 1)
                             }
                             Text(selectedFace.text)
-                                .font(.system(size: 13.5, design: .serif))
-                                .lineSpacing(4)
+                                .font(.custom("Iowan Old Style", size: 13.5))
+                                .lineSpacing(9.5)
                                 .foregroundStyle(material.isLight ? Color.black.opacity(0.88) : Color.white.opacity(0.92))
+                                .frame(minHeight: 25.65, alignment: .topLeading)
+                                .padding(.top, 11)
                                 .lineLimit(3)
                             let metadata = selectedFace.truthMetadata(updatedAt: snapshot.personalModel?.updatedAt)
                             HStack(spacing: 10) {
                                 Text(metadata.kind.label)
                                 if !metadata.detail.isEmpty { Text(metadata.detail).lineLimit(1) }
                                 Spacer()
-                                if let reference = selectedFace.evidenceRefs?.first {
-                                    Button("出处") { Task { await state.loadEvidence(reference) } }
+                                Button("出处") {
+                                    if let reference = selectedFace.evidenceRefs?.first?.trimmedNonEmpty {
+                                        Task { await state.loadEvidence(reference) }
+                                    } else {
+                                        selectedFaceID = nil
+                                        flipped = false
+                                        state.openRewind(dayID: snapshot.time?.days?.first?.id)
+                                    }
                                 }
                                 Button("改写") { correction = selectedFace.text }
                                 Button("行动") { state.selectedSection = .connectors }
-                                Button("分享 ↗") { state.openShare(highlight: selectedFace.text) }
+                                Button("分享 ↗") {
+                                    state.openFactShare(
+                                        kind: "FACE",
+                                        text: selectedFace.text,
+                                        meta: [
+                                            selectedFace.evidenceRefs?.first,
+                                            "来自 Personal Model 证据链",
+                                        ].compactMap { $0 }.joined(separator: " · ")
+                                    )
+                                }
                             }
                             .buttonStyle(.plain)
-                            .font(.system(size: 8.5, design: .monospaced))
-                            .foregroundStyle(material.isLight ? Color.black.opacity(0.52) : Color.white.opacity(0.52))
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(material.corner)
+                            .padding(.top, 12)
                             if !correction.isEmpty {
                                 HStack(spacing: 7) {
                                     TextField("不对的话，改写它", text: $correction)
@@ -2457,33 +3022,47 @@ private struct NativeHeroCard: View {
                                     material.isLight ? Color.black.opacity(0.06) : Color.white.opacity(0.08),
                                     in: RoundedRectangle(cornerRadius: 7)
                                 )
+                                .padding(.top, 9)
                             }
                         }
-                        .padding(13)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .frame(width: 394)
                         .background(
-                            material.isLight ? Color.white.opacity(0.88) : Color.black.opacity(0.72),
-                            in: RoundedRectangle(cornerRadius: 12)
+                            material.isLight
+                                ? Color.white.opacity(0.94)
+                                : Color(red: 10 / 255, green: 10 / 255, blue: 12 / 255).opacity(0.94),
+                            in: RoundedRectangle(cornerRadius: 11)
                         )
                         .overlay(
-                            RoundedRectangle(cornerRadius: 12)
+                            RoundedRectangle(cornerRadius: 11)
                                 .stroke(material.isLight ? Color.black.opacity(0.08) : Color.white.opacity(0.11))
                         )
+                        .offset(y: 4)
                     }
-                    HStack(alignment: .bottom) {
-                        Text("№ \(snapshot.model.memberNumber ?? "001")")
-                            .font(.system(size: 19, weight: .medium))
-                            .tracking(1.7)
-                        Spacer()
-                        Text("\(snapshot.personalModel?.memoryCount ?? 0) MEMORIES")
-                            .font(.system(size: 8.5, design: .monospaced))
-                            .tracking(1.7)
+                    if !rootSelected && selectedFaceID == nil {
+                        HStack(alignment: .bottom) {
+                            Text("№ \(snapshot.model.memberNumber ?? "001")")
+                                .font(.system(size: 19, weight: .medium))
+                                .tracking(1.7)
+                                .foregroundStyle(
+                                    material.isLight
+                                        ? nativeHexColor("#57544E")
+                                        : nativeHexColor("#F5F5F4")
+                                )
+                            Spacer()
+                            Text(cardMemoryCountLabel)
+                                .font(.system(size: 8.5, design: .monospaced))
+                                .tracking(1.7)
+                                .foregroundStyle(material.corner)
+                        }
                     }
-                    .foregroundStyle(material.corner)
                 }
                 .padding(.horizontal, 30)
-                .padding(.vertical, 26)
-            }
+                .padding(.top, 26)
+                .padding(.bottom, 22)
         }
+        .frame(width: cardWidth, height: cardHeight)
     }
 
     private var cardGesture: some Gesture {
@@ -2503,7 +3082,6 @@ private struct NativeNowPanel: View {
     let snapshot: PersonalModelSnapshot
     @State private var spotlightPlaceholder = "search your life — 或直接问"
     @FocusState private var searchFocused: Bool
-    @FocusState private var askFocused: Bool
 
     private var visibleNowItems: [NowItem] {
         (snapshot.now?.items ?? []).filter { item in
@@ -2536,6 +3114,20 @@ private struct NativeNowPanel: View {
             : "看看接下来 ›"
     }
 
+    private var displayedSpotlightPlaceholder: String {
+        if whoAmIVisualQAActive {
+            return placeholderPool.first ?? spotlightPlaceholder
+        }
+        return spotlightPlaceholder
+    }
+
+    private var panelRule: some View {
+        Rectangle()
+            .fill(Color(red: 60 / 255, green: 60 / 255, blue: 67 / 255).opacity(0.10))
+            .frame(height: 1)
+            .padding(.horizontal, 18)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
@@ -2543,11 +3135,17 @@ private struct NativeNowPanel: View {
                     .foregroundStyle(.secondary)
                     .font(.system(size: 18, weight: .regular))
                     .frame(width: 20, height: 20)
-                TextField(spotlightPlaceholder, text: $state.searchQuery)
+                TextField(
+                    "",
+                    text: $state.searchQuery,
+                    prompt: Text(displayedSpotlightPlaceholder)
+                        .foregroundColor(nativeHexColor("#9A968F"))
+                )
                     .textFieldStyle(.plain)
                     .font(.system(size: 18, weight: .regular))
                     .focused($searchFocused)
-                    .onSubmit { Task { await state.search() } }
+                    .onSubmit { Task { await state.submitSpotlight() } }
+                    .tracking(-0.36)
                     .accessibilityLabel("搜索 Personal Model 记忆")
                 if state.searchPhase == .loading {
                     ProgressView().controlSize(.small)
@@ -2561,13 +3159,20 @@ private struct NativeNowPanel: View {
                 .keyboardShortcut("k", modifiers: .command)
                 .frame(width: 0, height: 0)
                 .opacity(0)
-                Divider().frame(height: 26)
                 Button {
                     withAnimation(.spring(response: 0.32)) {
                         state.openMemorySky()
                     }
                 } label: {
                     Text("✦ 巡星")
+                        .padding(.leading, 13)
+                        .padding(.trailing, 9)
+                        .padding(.vertical, 5)
+                        .overlay(alignment: .leading) {
+                            Rectangle()
+                                .fill(Color.black.opacity(0.10))
+                                .frame(width: 1)
+                        }
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 10.5, weight: .regular))
@@ -2591,82 +3196,24 @@ private struct NativeNowPanel: View {
             }
             .padding(.horizontal, 18)
             .frame(height: 58)
-            Divider()
+            .overlay(alignment: .bottom) { panelRule }
 
             HStack(alignment: .firstTextBaseline, spacing: 9) {
                 Text("Now")
-                    .font(.caption.weight(.semibold))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(nativeHexColor("#5E5B55"))
                 Text("过去 · 现在 · 未来")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 10.5, weight: .regular))
+                    .foregroundStyle(nativeHexColor("#9A968F"))
                 Spacer()
                 Text(nowDateLabel.uppercased())
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 8.5, design: .monospaced))
+                    .tracking(0.85)
+                    .foregroundStyle(nativeHexColor("#A8A39A"))
             }
             .padding(.horizontal, 20)
-            .padding(.top, 14)
-            .padding(.bottom, 8)
-
-            if state.isAskOpen {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "sparkles")
-                        TextField("Ask your Personal Model…", text: $state.question)
-                            .textFieldStyle(.plain)
-                            .focused($askFocused)
-                            .onSubmit { Task { await state.ask() } }
-                            .accessibilityLabel("向 Personal Model 提问")
-                        if state.askPhase == .loading {
-                            ProgressView().controlSize(.small)
-                                .accessibilityLabel("正在查找依据并生成回答")
-                        }
-                        Button(state.askPhase == .loading ? "回答中…" : "Ask") {
-                            Task { await state.ask() }
-                        }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                            .keyboardShortcut(.return, modifiers: [.command])
-                            .disabled(
-                                state.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                    || state.askPhase == .loading
-                            )
-                    }
-                    switch state.askPhase {
-                    case .loading:
-                        NativeInlineState(
-                            symbol: "sparkles",
-                            title: "正在查找依据",
-                            detail: "回答会把直接记录、模型推断与生成文字分开显示。",
-                            tint: .blue
-                        )
-                    case .failure:
-                        VStack(alignment: .leading, spacing: 8) {
-                            NativeInlineState(
-                                symbol: "exclamationmark.triangle",
-                                title: "这次没有回答成功",
-                                detail: state.askErrorMessage ?? "Personal Model 暂时不可用。",
-                                tint: .orange
-                            )
-                            Button("重试 Ask") { Task { await state.ask() } }
-                                .buttonStyle(.bordered)
-                        }
-                    case .success, .insufficient:
-                        if let response = state.askResponse {
-                            NativeAskAnswer(
-                                state: state,
-                                response: response,
-                                isEvidenceInsufficient: state.askPhase == .insufficient
-                            )
-                        }
-                    case .idle, .empty:
-                        EmptyView()
-                    }
-                }
-                .padding(16)
-                .background(Color.accentColor.opacity(0.05))
-                Divider()
-            }
+            .offset(y: 2)
+            .frame(height: 38)
 
             if [.success, .insufficient].contains(state.searchPhase),
                let message = state.searchDegradedMessage {
@@ -2692,7 +3239,6 @@ private struct NativeNowPanel: View {
                         NativeNowRow(item: item) {
                             state.openRewind(dayID: item.dayId)
                         }
-                        Divider().padding(.horizontal, 20)
                     }
                 }
             case .loading:
@@ -2730,47 +3276,89 @@ private struct NativeNowPanel: View {
                 )
                 ForEach(state.searchResults, id: \.stableID) { result in
                     NativeSearchResultRow(state: state, result: result)
-                    Divider().padding(.horizontal, 20)
+                        .overlay(alignment: .top) { panelRule }
                 }
             case .success:
                 ForEach(state.searchResults, id: \.stableID) { result in
                     NativeSearchResultRow(state: state, result: result)
-                    Divider().padding(.horizontal, 20)
+                        .overlay(alignment: .top) { panelRule }
                 }
             }
 
-            HStack {
+            HStack(spacing: 15) {
                 Text("不是待办，只是时间留下的线索")
+                    .foregroundStyle(nativeHexColor("#AAA7A0"))
                 Spacer()
                 Button("时间") { state.selectedSection = .rewind }
                     .buttonStyle(.plain)
+                    .foregroundStyle(nativeHexColor("#6E6E73"))
                 if visibleNowItems.contains(where: \.isFutureLike) {
                     Button(futureActionLabel) { state.selectedSection = .rewind }
                         .buttonStyle(.plain)
+                        .foregroundStyle(nativeHexColor("#6E6E73"))
                 }
             }
-            .font(.caption)
-            .foregroundStyle(.tertiary)
+            .font(.system(size: 10.5, weight: .regular))
             .padding(.horizontal, 21)
-            .padding(.top, 12)
-            .padding(.bottom, 13)
+            .offset(y: -1)
+            .frame(height: 40)
         }
         .background {
-            RoundedRectangle(cornerRadius: 19, style: .continuous)
-                .fill(.regularMaterial)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 19, style: .continuous)
-                        .fill(
-                            Color(red: 0.965, green: 0.965, blue: 0.957)
-                                .opacity(0.28)
+            ZStack {
+                NativeBackdropFilter(
+                    cornerRadius: 19,
+                    blurRadius: 42,
+                    saturation: 1.25,
+                    backgroundColor: NSColor(
+                        calibratedRed: 247 / 255,
+                        green: 246 / 255,
+                        blue: 241 / 255,
+                        alpha: 0.91
+                    )
+                )
+                RoundedRectangle(cornerRadius: 19, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            stops: [
+                                .init(color: .black.opacity(0.027), location: 0),
+                                .init(color: .clear, location: 0.34),
+                                .init(color: .clear, location: 0.72),
+                                .init(color: .clear, location: 1),
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
                         )
-                }
+                    )
+            }
         }
         .overlay {
             RoundedRectangle(cornerRadius: 19, style: .continuous)
-                .stroke(Color.white.opacity(0.7), lineWidth: 1)
+                .strokeBorder(Color.black.opacity(0.10), lineWidth: 0.5)
         }
-        .shadow(color: .black.opacity(0.15), radius: 26, y: 18)
+        .overlay {
+            RoundedRectangle(cornerRadius: 19, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.94), .clear],
+                        startPoint: .top,
+                        endPoint: UnitPoint(x: 0.5, y: 0.12)
+                    ),
+                    lineWidth: 1
+                )
+        }
+        .background {
+            GeometryReader { proxy in
+                NativeCSSBoxShadow(
+                    boxSize: proxy.size,
+                    cornerRadius: 19,
+                    color: .black.opacity(0.38),
+                    blurRadius: 46,
+                    spread: -30,
+                    offset: CGSize(width: 0, height: 30)
+                )
+                .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+            }
+        }
         .onChange(of: state.searchFocusRequest) { _ in
             searchFocused = true
         }
@@ -3517,7 +4105,13 @@ private struct NativeConstellationStar: Identifiable {
 private struct NativeMemorySky: View {
     @ObservedObject var state: PersonalModelAppState
     let snapshot: PersonalModelSnapshot
-    @State private var mode: NativeSkyMode = .constellation
+    @State private var mode: NativeSkyMode = {
+        switch whoAmIVisualQAPresentation {
+        case "memory-sky-dust": return .dust
+        case "memory-sky-time": return .time
+        default: return .constellation
+        }
+    }()
     @State private var selectedStar: NativeConstellationStar?
     @State private var threeD = false
     @State private var skyTilt = CGSize.zero
@@ -3691,13 +4285,13 @@ private struct NativeMemorySky: View {
             title: "ROOT · 我是谁",
             detail: snapshot.personalModel?.root?.trimmedNonEmpty
                 ?? "Personal Model 正在形成对你的长期理解。",
-            source: "Personal Model · 当前快照",
+            source: "Persome · 当前快照",
             reference: nil,
-            dayID: nil,
+            dayID: snapshot.time?.days?.first?.id,
             shareKind: "ROOT",
             shareText: snapshot.personalModel?.root?.trimmedNonEmpty
                 ?? "Personal Model 正在形成对你的长期理解。",
-            shareMeta: "root_live · 由全部 \(memoryCountLabel) 条记忆推出",
+            shareMeta: "root_live · Persome · 由全部 \(memoryCountLabel) 条记忆推出",
             x: 0.5,
             y: 0.45,
             timeX: 0.5,
@@ -3761,8 +4355,9 @@ private struct NativeMemorySky: View {
     }
 
     var body: some View {
-        GeometryReader { proxy in
-            ZStack {
+        ZStack {
+            GeometryReader { proxy in
+                ZStack {
                 RadialGradient(
                     colors: [
                         Color(red: 0.082, green: 0.082, blue: 0.106),
@@ -3847,9 +4442,10 @@ private struct NativeMemorySky: View {
                     }
                 }
 
-                VStack {
-                    Spacer()
-                    returnToCard.padding(.bottom, 18)
+                    VStack {
+                        Spacer()
+                        returnToCard.padding(.bottom, 18)
+                    }
                 }
             }
         }
@@ -3858,6 +4454,12 @@ private struct NativeMemorySky: View {
         .onMoveCommand(perform: moveSelection)
         .task(id: state.memorySkyEvidenceRequest) {
             focusRequestedEvidence()
+        }
+        .task {
+            if whoAmIVisualQAPresentation == "memory-sky-root" {
+                selectedStar = rootStar
+                skyCorrection = ""
+            }
         }
         .onExitCommand {
             withAnimation(.easeOut(duration: 0.2)) { state.closeMemorySky() }
@@ -3911,14 +4513,15 @@ private struct NativeMemorySky: View {
                 Circle()
                     .fill(
                         RadialGradient(
-                            colors: [
-                                .white,
-                                Color(red: 0.78, green: 0.82, blue: 1.0).opacity(0.50),
-                                Color(red: 0.78, green: 0.82, blue: 1.0).opacity(0.14),
-                                .clear,
+                            stops: [
+                                .init(color: .white, location: 0),
+                                .init(color: .white, location: 3 / 14),
+                                .init(color: nativeHexColor("#C8D2FF").opacity(0.50), location: 5 / 14),
+                                .init(color: nativeHexColor("#C8D2FF").opacity(0.14), location: 9 / 14),
+                                .init(color: .clear, location: 1),
                             ],
                             center: .center,
-                            startRadius: 1,
+                            startRadius: 0,
                             endRadius: 14
                         )
                     )
@@ -3956,13 +4559,13 @@ private struct NativeMemorySky: View {
                                 .foregroundStyle(theme.color)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.center)
+                                .frame(maxWidth: 260)
                                 .shadow(color: .black.opacity(0.9), radius: 5, y: 1)
                             Text("\(theme.face.observations ?? 0) observations")
                                 .font(.system(size: 8.5, design: .monospaced))
                                 .tracking(0.7)
                                 .foregroundStyle(.white.opacity(0.45))
                         }
-                        .frame(width: 260)
                     }
                     .buttonStyle(.plain)
                     .position(
@@ -3991,14 +4594,15 @@ private struct NativeMemorySky: View {
                     .fill(
                         RadialGradient(
                             stops: [
-                                .init(color: tint.opacity(0.96 - Double(star.age / 80)), location: 0.16),
-                                .init(color: tint.opacity(0.42), location: 0.30),
-                                .init(color: tint.opacity(0.10), location: 0.62),
+                                .init(color: tint.opacity(1 - Double(star.age / 70)), location: 0),
+                                .init(color: tint.opacity(1 - Double(star.age / 70)), location: star.isBig ? 0.26 : 0.19),
+                                .init(color: tint.opacity(0.42), location: star.isBig ? 0.38 : 0.29),
+                                .init(color: tint.opacity(0.10), location: 0.65),
                                 .init(color: .clear, location: 1),
                             ],
                             center: .center,
                             startRadius: 0,
-                            endRadius: 11
+                            endRadius: 10
                         )
                     )
                     .frame(width: 22, height: 22)
@@ -4024,6 +4628,10 @@ private struct NativeMemorySky: View {
                 .frame(
                     width: star.isAmbient ? 1.3 : 2,
                     height: star.isAmbient ? 1.3 : 2
+                )
+                .offset(
+                    x: star.isAmbient ? 0.65 : 1,
+                    y: star.isAmbient ? 0.65 : 1
                 )
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
@@ -4126,13 +4734,18 @@ private struct NativeMemorySky: View {
 
             Text(star.detail)
                 .font(.custom("Iowan Old Style", size: 13.5))
+                .fontWeight(.regular)
                 .lineSpacing(9.5)
                 .foregroundStyle(.white.opacity(0.96))
+                .frame(minHeight: 25.65, alignment: .topLeading)
                 .padding(.top, 11)
 
             HStack(alignment: .firstTextBaseline, spacing: 11) {
                 Text(
-                    [star.source, star.reference]
+                    [
+                        star.source,
+                        star.id == "root" ? star.shareMeta : star.reference,
+                    ]
                         .compactMap { $0?.trimmedNonEmpty }
                         .joined(separator: " · ")
                 )
@@ -4285,6 +4898,222 @@ private func stableUnit(_ value: String, salt: UInt64) -> CGFloat {
     return CGFloat(hash % 10_000) / 10_000
 }
 
+private struct NativeAskOverlay: View {
+    @ObservedObject var state: PersonalModelAppState
+    let snapshot: PersonalModelSnapshot
+    @FocusState private var questionFocused: Bool
+    @FocusState private var correctionFocused: Bool
+    @State private var correction = ""
+
+    private var placeholder: String {
+        snapshot.now?.items?
+            .first { !$0.isFutureLike || $0.hasReliableSuggestionSource }?
+            .displayTitle
+            ?? "想说什么，也可以直接说。"
+    }
+
+    private var answerMeta: String {
+        if state.askPhase == .failure {
+            return "Personal Model · 暂时没有找到相关证据"
+        }
+        if state.askIsReflection {
+            return "倾诉 · 只返回观察，不替你做决定"
+        }
+        if state.askPhase == .insufficient {
+            return "Personal Model · 暂时没有足够个人依据"
+        }
+        if state.askResponse == nil, !state.answer.isEmpty {
+            return "Persome · 最近活动 · ⏎ 下一条"
+        }
+        return state.askResponse?.source?.trimmedNonEmpty
+            ?? "Persome · 本机 Personal Model"
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Color(red: 20 / 255, green: 20 / 255, blue: 22 / 255)
+                    .opacity(0.24)
+                .contentShape(Rectangle())
+                .onTapGesture { state.closeAsk() }
+
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("问这张卡")
+                            .font(.system(size: 13, weight: .semibold))
+                        Spacer()
+                        Button("×") { state.closeAsk() }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 20, weight: .light))
+                            .accessibilityLabel("关闭 Ask")
+                    }
+                    .foregroundStyle(nativeHexColor("#F5F5F4"))
+                    .padding(.horizontal, 4)
+                    .padding(.bottom, 9)
+
+                    HStack(spacing: 12) {
+                        Text("?")
+                            .font(.custom("Iowan Old Style", size: 17))
+                            .foregroundStyle(nativeHexColor("#6E6E73"))
+                        TextField(placeholder, text: $state.question)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 15))
+                            .foregroundStyle(nativeHexColor("#1D1D1F"))
+                            .focused($questionFocused)
+                            .onSubmit { Task { await state.submitAsk() } }
+                            .accessibilityLabel("向 Personal Model 提问")
+                        if state.askPhase == .loading {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(nativeHexColor("#6E6E73"))
+                                .accessibilityLabel("Personal Model 正在回答")
+                        }
+                    }
+                    .padding(.horizontal, 17)
+                    .padding(.vertical, 14)
+                    .background {
+                        NativeBackdropFilter(
+                            cornerRadius: 16,
+                            blurRadius: 24,
+                            saturation: 1.6,
+                            backgroundColor: NSColor(
+                                calibratedWhite: 1,
+                                alpha: 0.55
+                            )
+                        )
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.40), lineWidth: 1)
+                    }
+                    .overlay(alignment: .top) {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.90), lineWidth: 1)
+                            .mask(alignment: .top) {
+                                Rectangle().frame(height: 2)
+                            }
+                    }
+                    .shadow(color: .black.opacity(0.18), radius: 18, y: 12)
+
+                    answerCard
+                }
+                .frame(width: min(620, geometry.size.width - 36))
+                .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+            }
+        }
+        .ignoresSafeArea()
+        .task {
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            questionFocused = true
+            if let presentation = whoAmIVisualQAPresentation,
+               presentation.hasPrefix("reflect:") {
+                state.searchQuery = String(presentation.dropFirst("reflect:".count))
+                await state.submitSpotlight()
+            } else if let presentation = whoAmIVisualQAPresentation,
+                      presentation.hasPrefix("ask:") {
+                state.question = String(presentation.dropFirst("ask:".count))
+                await state.submitAsk()
+            }
+        }
+        .onExitCommand { state.closeAsk() }
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private var answerCard: some View {
+        if state.askPhase != .idle || state.askResponse != nil {
+            VStack(alignment: .leading, spacing: 0) {
+                Group {
+                    switch state.askPhase {
+                    case .loading:
+                        Text("正在从你的 Personal Model 里找答案…")
+                    case .failure:
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(state.askErrorMessage ?? "这次没有回答成功。恢复本机 Personal Model 连接后再试一次。")
+                            Button("重试 Ask") { Task { await state.ask() } }
+                                .buttonStyle(.bordered)
+                                .disabled(state.question.trimmedNonEmpty == nil)
+                        }
+                    case .success, .insufficient:
+                        if let response = state.askResponse {
+                            NativeAskAnswer(
+                                state: state,
+                                response: response,
+                                isEvidenceInsufficient: state.askPhase == .insufficient
+                            )
+                        } else {
+                            Text(state.answer)
+                        }
+                    case .idle, .empty:
+                        Text(state.answer)
+                    }
+                }
+                .font(.custom("Iowan Old Style", size: 15))
+                .fontWeight(.regular)
+                .lineSpacing(12.75)
+                .foregroundStyle(nativeHexColor("#1D1D1F"))
+                .frame(maxWidth: .infinity, minHeight: 27.75, alignment: .topLeading)
+                .textSelection(.enabled)
+
+                HStack(spacing: 8) {
+                    Text(answerMeta)
+                        .lineLimit(1)
+                    Button("不对，改写 →") {
+                        let seed = state.askResponse?.answer ?? state.answer
+                        guard !seed.isEmpty else { return }
+                        correction = seed
+                        DispatchQueue.main.async { correctionFocused = true }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(
+                        state.askPhase == .loading
+                            || (state.askResponse?.answer ?? state.answer).isEmpty
+                    )
+                }
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(nativeHexColor("#AEAEB2"))
+                .padding(.top, 7)
+
+                if !correction.isEmpty {
+                    TextField("改写它 ⏎ — correct_memory", text: $correction)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                        .foregroundStyle(nativeHexColor("#1D1D1F"))
+                        .padding(.horizontal, 11)
+                        .frame(height: 31)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 7))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 7)
+                                .stroke(nativeHexColor("#E7E4DE"), lineWidth: 1)
+                        }
+                        .focused($correctionFocused)
+                        .onSubmit {
+                            Task {
+                                await state.correct(correction)
+                                correction = ""
+                            }
+                        }
+                        .padding(.top, 10)
+                }
+            }
+            .padding(.horizontal, 17)
+            .padding(.vertical, 15)
+            .background(
+                Color.white.opacity(0.88),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(nativeHexColor("#1D1D1F"))
+                    .frame(width: 2)
+                    .clipShape(RoundedRectangle(cornerRadius: 1))
+            }
+            .shadow(color: .black.opacity(0.32), radius: 16, y: 12)
+            .padding(.top, 10)
+        }
+    }
+}
+
 private struct NativeAskAnswer: View {
     @ObservedObject var state: PersonalModelAppState
     let response: AskResponse
@@ -4397,41 +5226,80 @@ private struct NativeNowRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            NativeActivityIcon(text: "\(item.title) \(item.why ?? "")")
+            NativeActivityIcon(
+                text: [item.app, item.title, item.why]
+                    .compactMap { $0?.trimmedNonEmpty }
+                    .joined(separator: " ")
+            )
                 .frame(width: 34, alignment: .leading)
+                .offset(y: 1)
             HStack(spacing: 6) {
-                Text(kindMarker)
-                    .font(.system(size: 15, design: .serif))
+                if kindLabel == "未来" {
+                    Circle()
+                        .stroke(nativeHexColor("#6E6E73"), lineWidth: 1)
+                        .frame(width: 11, height: 11)
+                        .frame(width: 15, height: 15)
+                } else if kindLabel == "现在" {
+                    Rectangle()
+                        .fill(nativeHexColor("#6E6E73"))
+                        .frame(width: 12, height: 1)
+                        .frame(width: 15, height: 15)
+                        .offset(y: 1.25)
+                } else {
+                    Text(kindMarker)
+                        .font(.custom("Iowan Old Style", size: 15))
+                        .foregroundStyle(nativeHexColor("#6E6E73"))
+                        .frame(width: 15, height: 15)
+                        .offset(y: 0.75)
+                }
                 Text(kindLabel)
                     .font(.system(size: 10.5))
+                    .foregroundStyle(nativeHexColor("#8A8780"))
             }
-                .foregroundStyle(.secondary)
                 .frame(width: 48, alignment: .leading)
-            VStack(alignment: .leading, spacing: 3) {
+                .offset(y: 1)
+            VStack(alignment: .leading, spacing: 6) {
                 Text(item.displayTitle)
-                    .font(.system(size: 13.5, weight: .medium))
+                    .font(
+                        Font(
+                            NSFont.systemFont(
+                                ofSize: 13.5,
+                                weight: NSFont.Weight(0.30)
+                            )
+                        )
+                    )
+                    .tracking(-0.16)
                     .lineLimit(1)
                 if let why = item.why?.trimmedNonEmpty {
                     Text(why)
                         .font(.system(size: 11.5, weight: .regular))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(nativeHexColor("#8A8780"))
                         .lineLimit(1)
                 }
             }
+            .offset(y: 0.5)
             Spacer()
             if !item.isFutureLike, let when = item.when?.trimmedNonEmpty {
                 Text(when)
                     .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(nativeHexColor("#AAA7A0"))
+                    .offset(y: 1)
             } else if item.hasReliableSuggestionSource,
                       let when = item.when?.trimmedNonEmpty {
                 Text(when)
                     .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(nativeHexColor("#AAA7A0"))
+                    .offset(y: 1)
             }
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .frame(height: 63)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color(red: 60 / 255, green: 60 / 255, blue: 67 / 255).opacity(0.10))
+                .frame(height: 1)
+                .padding(.horizontal, 18)
+        }
         .opacity(item.isFutureLike ? 0.76 : 1)
         .contentShape(Rectangle())
         .onTapGesture(perform: openItem)
@@ -4502,24 +5370,30 @@ private struct NativeActivityIcon: View {
                     .resizable()
                     .scaledToFill()
             } else {
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(
-                        LinearGradient(
-                            colors: [nativeHexColor("#FAFAF8"), nativeHexColor("#DAD8D2")],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6.35, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [nativeHexColor("#FAFAF8"), nativeHexColor("#DAD8D2")],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
-                    )
-                    .overlay {
-                        Circle()
-                            .fill(nativeHexColor("#2C2C2E"))
-                            .frame(width: 10, height: 10)
-                            .overlay {
-                                Circle()
-                                    .fill(nativeHexColor("#F5F5F2"))
-                                    .frame(width: 3.2, height: 3.2)
-                            }
-                    }
+                        .frame(width: 25.375, height: 25.375)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 6.23, style: .continuous)
+                                .stroke(Color.black.opacity(0.08), lineWidth: 0.25)
+                                .frame(width: 25.14, height: 25.14)
+                        }
+                    Circle()
+                        .fill(nativeHexColor("#2C2C2E"))
+                        .frame(width: 10, height: 10)
+                        .overlay {
+                            Circle()
+                                .fill(nativeHexColor("#F5F5F2"))
+                                .frame(width: 3.2, height: 3.2)
+                        }
+                }
             }
         }
         .frame(width: 29, height: 29)
@@ -4528,7 +5402,6 @@ private struct NativeActivityIcon: View {
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .stroke(Color.black.opacity(0.10), lineWidth: 0.5)
         )
-        .shadow(color: .black.opacity(0.07), radius: 2, y: 1)
         .accessibilityHidden(true)
     }
 }
@@ -5120,9 +5993,11 @@ private struct NativeRewindView: View {
 
     private var rewindMonth: some View {
         GeometryReader { geometry in
+            let panelWidth = max(320, min(980, geometry.size.width - 80))
+            let panelHeight = max(430, min(526, geometry.size.height - 112))
             ScrollView {
                 VStack(spacing: 0) {
-                    Spacer(minLength: 12)
+                    Spacer(minLength: 0)
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(spacing: 10) {
                             Image(systemName: "magnifyingglass")
@@ -5208,10 +6083,12 @@ private struct NativeRewindView: View {
                             selectFuture: openFutureDay
                         )
                     }
+                    .frame(width: panelWidth - 60, alignment: .topLeading)
                     .padding(.horizontal, 30)
                     .padding(.top, 24)
                     .padding(.bottom, 26)
-                    .frame(maxWidth: 980, alignment: .topLeading)
+                    .frame(width: panelWidth, alignment: .topLeading)
+                    .frame(minHeight: panelHeight, alignment: .topLeading)
                     .background {
                         ZStack {
                             RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -5229,9 +6106,10 @@ private struct NativeRewindView: View {
                         }
                     )
                     .shadow(color: .black.opacity(0.24), radius: 36, y: 28)
-                    Spacer(minLength: 64)
+                    Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 40)
+                .padding(.bottom, 26)
                 .frame(minHeight: geometry.size.height)
                 .frame(maxWidth: .infinity)
             }

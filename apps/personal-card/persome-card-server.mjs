@@ -34,6 +34,9 @@ import { managedRuntimeIdentityMatches } from "./src/setup/runtime-identity.mjs"
 
 const CARD_ROOT = dirname(fileURLToPath(import.meta.url));
 const PRODUCT_VERSION = (() => {
+  if (process.env.WHOAMI_PRODUCT_VERSION) {
+    return String(process.env.WHOAMI_PRODUCT_VERSION).trim();
+  }
   try {
     return readFileSync(resolve(CARD_ROOT, "product-version"), "utf8").trim()
       || "development";
@@ -215,6 +218,13 @@ function ownerProviderFor(profile) {
         contentBackend.ask({ modelId, question, displayName, options }),
       getEvidence: ({ modelId, reference }) =>
         contentBackend.getEvidence({ modelId, reference }),
+      // A jot writes new memory, so the cached grounded content for this model
+      // is stale the moment it lands.
+      jot: async ({ modelId, text }) => {
+        const result = await writeLocalJot(text);
+        contentBackend.invalidate(modelId);
+        return result;
+      },
       correct: async ({ modelId, correction }) => {
         const result = await writeLocalCorrection(correction);
         contentBackend.invalidate(modelId);
@@ -392,6 +402,25 @@ async function connectObservableMcpTarget(agent, binding = {}) {
   return mcpTargetStatus(agent);
 }
 
+async function disconnectObservableMcpTarget(agent) {
+  const status = await mcpTargetStatus(agent);
+  // Never remove a user's unrelated direct MCP configuration. Persome only
+  // revokes entries that point back to this product's observable proxy.
+  if (!status.observed) return status;
+  const command = agent === "codex" ? "codex" : "claude";
+  const removeArgs = agent === "codex"
+    ? ["mcp", "remove", OBSERVABLE_MCP_NAME]
+    : ["mcp", "remove", OBSERVABLE_MCP_NAME, "--scope", "user"];
+  const removed = await runLocalCommand(command, removeArgs, 20000);
+  if (removed.code !== 0) {
+    const error = new Error("Persome could not revoke this MCP connection.");
+    error.code = "CONNECTOR_REVOKE_FAILED";
+    error.status = 409;
+    throw error;
+  }
+  return mcpTargetStatus(agent);
+}
+
 async function connectObservableMcp(req, res) {
   const body = await readJsonBody(req);
   const agent = body.agent === "codex"
@@ -408,6 +437,7 @@ async function connectObservableMcp(req, res) {
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".md": "text/markdown; charset=utf-8",
   ".png": "image/png",
@@ -1590,12 +1620,13 @@ async function personalModelSetupStatus() {
     });
   }
   const profile = ownerProfileStore.publicView();
+  const modelBuilt = DEV_MODE || ["complete", "ready"].includes(buildStatus);
   let state = "ready";
   if (!profile) state = "profile_required";
   else if (!installed) state = "not_installed";
-  else if (!initialized) state = "onboarding_required";
+  else if (!initialized || !modelBuilt) state = "onboarding_required";
   return Object.freeze({
-    ready: DEV_MODE || (!!profile && initialized),
+    ready: DEV_MODE || (!!profile && initialized && modelBuilt),
     devMode: DEV_MODE,
     productVersion: PRODUCT_VERSION,
     state,
@@ -1933,6 +1964,37 @@ async function correctActiveModel(req, res, url) {
   });
 }
 
+async function jotActiveModel(req, res, url) {
+  const body = await readJsonBody(req);
+  const context = modelContext(req, res, url, body, "model:jot");
+  if (context.authorization.viewerMode !== "owner") {
+    sendJson(res, 403, {
+      ok: false,
+      code: "OWNER_REQUIRED",
+      error: "Only the owner can add a jot to this Personal Model.",
+    });
+    return;
+  }
+  const text = String(body.text || body.content || "").trim().slice(0, 4000);
+  if (!text) {
+    sendJson(res, 400, { ok: false, code: "JOT_REQUIRED", error: "请输入要记住的内容" });
+    return;
+  }
+  const provider = providerRegistry.resolve(context.modelId);
+  const result = await provider.jot(context.modelId, text, context.grant);
+  const refreshed = await sessionModelService.switchModel({
+    sessionId: context.sessionId,
+    modelId: context.modelId,
+    access: "owner",
+  });
+  sendJson(res, 200, {
+    ok: true,
+    modelId: context.modelId,
+    revision: refreshed.revision,
+    receipt: result?.result?.memory_id || result?.result?.id || null,
+  });
+}
+
 async function serveModelConnectors(req, res, url) {
   const context = modelContext(req, res, url, undefined, "connectors:read");
   sendJson(res, 200, {
@@ -2020,6 +2082,44 @@ async function connectModelConnector(req, res, url, connectorId) {
       sessionId: connectorSession.sessionId,
     },
     event,
+  });
+}
+
+async function revokeModelConnector(req, res, url, connectorId) {
+  const body = await readJsonBody(req);
+  const context = modelContext(req, res, url, body, "connectors:connect");
+  if (context.authorization.viewerMode !== "owner") {
+    sendJson(res, 403, {
+      ok: false,
+      code: "OWNER_REQUIRED",
+      error: "Only the owner can revoke an AI connection.",
+    });
+    return;
+  }
+  const connectorMap = activeConnectorSessions.get(context.sessionId);
+  const connectorSessionId = connectorMap?.get(connectorId);
+  if (connectorSessionId) {
+    connectorSessionService.revoke(connectorSessionId, "owner-revoked");
+    connectorMap.delete(connectorId);
+  }
+  if (
+    context.modelId === ownerProfile?.modelId
+    && process.env.WHOAMI_PROVIDER_MODE !== "fixture"
+    && ["codex", "claude-code"].includes(connectorId)
+  ) {
+    await disconnectObservableMcpTarget(connectorId);
+  }
+  const refreshed = await sessionModelService.switchModel({
+    sessionId: context.sessionId,
+    modelId: context.modelId,
+    access: "owner",
+  });
+  sendJson(res, 200, {
+    ok: true,
+    modelId: context.modelId,
+    revision: refreshed.revision,
+    connectorId,
+    revoked: true,
   });
 }
 
@@ -2653,6 +2753,74 @@ async function writeLocalCorrection(correction) {
   }
 }
 
+async function writeLocalJot(text) {
+  const client = await connectPersome();
+  try {
+    const result = await client.callTool("remember", {
+      content: text,
+      tags: "persome,jot",
+    });
+    return parseToolJson(result);
+  } finally {
+    client.close();
+  }
+}
+
+async function askPersome(req, res) {
+  const body = await readJsonBody(req);
+  const question = String(body.question || "").trim().slice(0, 1200);
+  const startedAt = Date.now();
+  if (!question) {
+    sendJson(res, 400, { ok: false, error: "请输入问题" });
+    return;
+  }
+
+  try {
+    const response = await fetch(`${WHO_AM_I_URL}/api/owner/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+      signal: AbortSignal.timeout(18000),
+    });
+    const data = await response.json();
+    if (!response.ok || data.ok === false) throw new Error(data.error || "本机问答服务暂时不可用");
+    sendJson(res, 200, { ...data, answer: compactOwnerAnswer(data.answer) });
+    return;
+  } catch {
+    const client = await connectPersome();
+    try {
+      const searchResult = await client.callTool("search", {
+        query: question,
+        top_k: 3,
+        breadth: 0.25,
+        include_bodies: true,
+      });
+      const search = parseToolJson(searchResult);
+      const hits = (Array.isArray(search.hits) ? search.hits : search.results || []).slice(0, 3);
+      const seen = new Set();
+      const evidence = [];
+      for (const hit of hits) {
+        const text = cleanModelText(hit.content || hit.text || hit.summary, 210);
+        const key = text.toLowerCase().replace(/\W/g, "").slice(0, 90);
+        if (!text || seen.has(key)) continue;
+        seen.add(key);
+        evidence.push(text);
+        if (evidence.length >= 2) break;
+      }
+      sendJson(res, 200, {
+        ok: true,
+        answer: evidence.length
+          ? `Persome 找到的直接依据：${evidence.join("；另一条相关记忆是：")}`
+          : "Persome 已连接，但这次没有找到足够清晰的依据。",
+        latencyMs: Date.now() - startedAt,
+        tools: ["search"],
+      });
+    } finally {
+      client.close();
+    }
+  }
+}
+
 function readableChinese(value, max = 220) {
   const text = cleanModelText(value, max);
   const chinese = (text.match(/[\u3400-\u9fff]/g) || []).length;
@@ -2741,7 +2909,13 @@ async function correctPersome(req, res) {
 
 async function serveStatic(req, res, url) {
   viewerSessionFor(req, res);
-  const requested = url.pathname === "/" ? CARD_FILE : decodeURIComponent(url.pathname.slice(1));
+  const requested = url.pathname === "/"
+    ? CARD_FILE
+    : url.pathname === "/app" || url.pathname === "/app/"
+      ? "dist/renderer/index.html"
+      : url.pathname.startsWith("/app/")
+        ? `dist/renderer/${decodeURIComponent(url.pathname.slice(5))}`
+        : decodeURIComponent(url.pathname.slice(1));
   const filePath = resolve(CARD_ROOT, requested);
   if (filePath !== CARD_ROOT && !filePath.startsWith(`${CARD_ROOT}${sep}`)) {
     res.writeHead(403);
@@ -2809,6 +2983,7 @@ const server = createServer(async (req, res) => {
           ok: true,
           productVersion: PRODUCT_VERSION,
           devMode: DEV_MODE,
+          desktopRenderer: "electron-v1",
         });
         return;
       }
@@ -2848,6 +3023,10 @@ const server = createServer(async (req, res) => {
         await askActiveModel(req, res, url);
         return;
       }
+      if (req.method === "POST" && url.pathname === "/api/model/jot") {
+        await jotActiveModel(req, res, url);
+        return;
+      }
       if (req.method === "POST" && url.pathname === "/api/model/correct") {
         await correctActiveModel(req, res, url);
         return;
@@ -2861,6 +3040,13 @@ const server = createServer(async (req, res) => {
       );
       if (req.method === "POST" && connectorMatch) {
         await connectModelConnector(req, res, url, connectorMatch[1]);
+        return;
+      }
+      const connectorRevokeMatch = url.pathname.match(
+        /^\/api\/model\/connectors\/([A-Za-z0-9_-]+)\/revoke$/,
+      );
+      if (req.method === "POST" && connectorRevokeMatch) {
+        await revokeModelConnector(req, res, url, connectorRevokeMatch[1]);
         return;
       }
       const connectorDisconnectMatch = url.pathname.match(

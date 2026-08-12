@@ -2,5 +2,7 @@
 /.idea/
 /.vscode/
 /dist/
+/apps/personal-card/dist/
+/apps/personal-card/release/
 /outputs/
 /work/

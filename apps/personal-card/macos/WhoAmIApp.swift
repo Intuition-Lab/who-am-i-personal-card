@@ -91,14 +91,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(
-            isBootstrapInstaller || whoAmIVisualQAActive ? .regular : .accessory
+            isBootstrapInstaller || (whoAmIVisualQAActive && !whoAmIVisualQABackground)
+                ? .regular
+                : .accessory
         )
         createMainMenu()
         createWindow(bootstrap: isBootstrapInstaller)
-        if !isBootstrapInstaller {
+        if !isBootstrapInstaller && !whoAmIVisualQABackground {
             createStatusItem()
         }
-        NSApp.activate(ignoringOtherApps: true)
+        if !whoAmIVisualQABackground {
+            NSApp.activate(ignoringOtherApps: true)
+        }
 
         Task { [weak self] in
             await self?.prepareAndLoad()
@@ -251,8 +255,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             window.center()
         } else {
             positionSpotlightPanel(window)
+            if whoAmIVisualQABackground {
+                window.setContentSize(NSSize(width: 1_280, height: 724))
+            }
         }
-        window.makeKeyAndOrderFront(nil)
+        if whoAmIVisualQABackground {
+            window.orderOut(nil)
+        } else {
+            window.makeKeyAndOrderFront(nil)
+        }
 
         self.window = window
 
@@ -835,6 +846,21 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             if whoAmIVisualQAActive,
                let presentation = whoAmIVisualQAPresentation,
+               presentation.hasPrefix("ask:") || presentation.hasPrefix("reflect:") {
+                state.isAskOpen = true
+            }
+            if whoAmIVisualQAActive,
+               let presentation = whoAmIVisualQAPresentation,
+               [
+                   "memory-sky",
+                   "memory-sky-root",
+                   "memory-sky-dust",
+                   "memory-sky-time",
+               ].contains(presentation) {
+                state.isMemorySkyOpen = true
+            }
+            if whoAmIVisualQAActive,
+               let presentation = whoAmIVisualQAPresentation,
                let prefix = [
                    "memory-sky-evidence:",
                    "share-fact-evidence:",
@@ -867,7 +893,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 ? NSColor.windowBackgroundColor
                 : .clear
             self.statusMenuModelItem?.title = "Personal Model · 已连接"
-            self.showMainWindow(nil)
+            if whoAmIVisualQABackground {
+                window.orderOut(nil)
+            } else {
+                self.showMainWindow(nil)
+            }
             self.scheduleVisualQASnapshotIfNeeded(window: window, state: state)
         }
     }

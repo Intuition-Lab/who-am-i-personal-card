@@ -14,6 +14,7 @@ source "${PRODUCT_ROOT}/scripts/lib/product-lock.sh"
 
 MODE="install"
 INTERACTION_MODE="auto"
+INSTALL_PRODUCT_APP=1
 
 usage() {
   cat <<'EOF'
@@ -27,6 +28,8 @@ Options:
   --interactive    Require an interactive terminal and complete onboarding.
   --non-interactive
                    Install without prompts; onboarding remains pending.
+  --runtime-only   Install or verify the pinned Runtime for an already-running
+                   Persome desktop app; do not replace the app bundle.
   -h, --help       Show this help.
 
 The interactive install explains and requests macOS Accessibility and Screen
@@ -58,6 +61,10 @@ while [[ $# -gt 0 ]]; do
         exit 2
       fi
       INTERACTION_MODE="non-interactive"
+      shift
+      ;;
+    --runtime-only)
+      INSTALL_PRODUCT_APP=0
       shift
       ;;
     -h|--help)
@@ -190,7 +197,9 @@ The installer will:
   4. install or update only the product-managed Runtime path;
   5. never claim, replace, or re-onboard a standalone existing Runtime;
   6. never access the Personal Model source repository during installation;
-  7. install the native Who Am I app and its pinned private Node runtime.
+  7. $([[ "${INSTALL_PRODUCT_APP}" -eq 1 ]] \
+    && printf 'install the product app and its pinned private Node runtime.' \
+    || printf 'leave the already-running Persome app bundle unchanged.')
 EOF
   if [[ "${INTERACTION_MODE}" == "interactive" ]]; then
     printf '%s\n' \
@@ -849,10 +858,24 @@ trap 'exit 129' HUP
 install_state_preflight
 if [[ "${EXTERNAL_EXISTING}" -eq 1 ]]; then
   temporary_root="$(runtime_temporary_root_create "personal-model-product")"
-  install_personal_card
-  installer_test_failpoint "after-card-before-verification"
-  /bin/bash "${PRODUCT_ROOT}/scripts/verify-product.sh"
-  personal_card_transaction_commit
+  if [[ "${INSTALL_PRODUCT_APP}" -eq 1 ]]; then
+    install_personal_card
+    installer_test_failpoint "after-card-before-verification"
+    /bin/bash "${PRODUCT_ROOT}/scripts/verify-product.sh"
+    personal_card_transaction_commit
+  fi
+  if [[ "${INSTALL_PRODUCT_APP}" -eq 0 ]]; then
+    cat <<EOF
+
+Existing Personal Model detected and preserved.
+Persome can connect to:
+
+  ${RUNTIME_INSTALL_HOME}
+
+No Runtime files, model data, permissions, MCP settings, or app bundles were changed.
+EOF
+    exit 0
+  fi
   cat <<EOF
 
 Existing Personal Model detected and preserved.
@@ -876,11 +899,23 @@ if [[ "${MANAGED_EXISTING}" -eq 1 \
   prepare_bundled_runtime_checkout "${temporary_root}/runtime"
   runtime_checkout_verify "${temporary_root}/runtime"
   install_management_bundle "${temporary_root}/runtime"
-  install_personal_card
-  installer_test_failpoint "after-card-before-verification"
+  if [[ "${INSTALL_PRODUCT_APP}" -eq 1 ]]; then
+    install_personal_card
+    installer_test_failpoint "after-card-before-verification"
+  fi
   /bin/bash "${PRODUCT_ROOT}/scripts/verify.sh" --quick
-  /bin/bash "${PRODUCT_ROOT}/scripts/verify-product.sh"
-  personal_card_transaction_commit
+  if [[ "${INSTALL_PRODUCT_APP}" -eq 1 ]]; then
+    /bin/bash "${PRODUCT_ROOT}/scripts/verify-product.sh"
+    personal_card_transaction_commit
+  fi
+  if [[ "${INSTALL_PRODUCT_APP}" -eq 0 ]]; then
+    cat <<EOF
+
+The installed Personal Model already matches Persome's pinned Runtime.
+Its executables, permissions, model data, and the Persome app were preserved.
+EOF
+    exit 0
+  fi
   cat <<EOF
 
 The installed Personal Model already matches this product's pinned Runtime.
@@ -972,17 +1007,34 @@ runtime_managed_venv_artifacts_verify
 install_management_bundle "${temporary_root}/runtime"
 runtime_receipt_write "${RUNTIME_INSTALL_HOME}/venv/.product-runtime.lock"
 runtime_receipt_write "${RUNTIME_INSTALL_HOME}/product-runtime.lock"
-install_personal_card
-installer_test_failpoint "after-card-before-verification"
+if [[ "${INSTALL_PRODUCT_APP}" -eq 1 ]]; then
+  install_personal_card
+  installer_test_failpoint "after-card-before-verification"
+fi
 /bin/bash "${PRODUCT_ROOT}/scripts/verify.sh" --quick
-/bin/bash "${PRODUCT_ROOT}/scripts/verify-product.sh"
-personal_card_transaction_commit
+if [[ "${INSTALL_PRODUCT_APP}" -eq 1 ]]; then
+  /bin/bash "${PRODUCT_ROOT}/scripts/verify-product.sh"
+  personal_card_transaction_commit
+fi
 intent_path="${RUNTIME_INSTALL_HOME}/product-runtime.installing"
 runtime_receipt_path_validate "${intent_path}"
 /bin/rm -f -- "${intent_path}"
 INSTALL_INTENT_WRITTEN=0
 
-if [[ "${INTERACTION_MODE}" == "interactive" ]]; then
+if [[ "${INTERACTION_MODE}" == "interactive" \
+  && "${INSTALL_PRODUCT_APP}" -eq 0 ]]; then
+  cat <<EOF
+
+Personal Model Runtime is ready for Persome.
+
+Run the privacy-safe diagnostic and quick identity check:
+
+  /bin/bash "${RUNTIME_INSTALL_HOME}/product-management/scripts/diagnose.sh"
+  /bin/bash "${RUNTIME_INSTALL_HOME}/product-management/scripts/verify.sh" --quick
+
+Return to Persome; it will detect this Runtime automatically.
+EOF
+elif [[ "${INTERACTION_MODE}" == "interactive" ]]; then
   cat <<EOF
 
 Base Runtime installation is ready.
@@ -1000,6 +1052,16 @@ Who Am I is installed in:
   ${HOME}/Applications/Who Am I.app
 EOF
   /usr/bin/open "${HOME}/Applications/Who Am I.app" || true
+elif [[ "${INSTALL_PRODUCT_APP}" -eq 0 ]]; then
+  cat <<EOF
+
+Base Runtime installation is ready; permission onboarding is pending.
+From a logged-in terminal, run:
+
+  "${RUNTIME_INSTALL_HOME}/venv/bin/persome" onboard
+
+Then return to Persome; the app bundle was left unchanged.
+EOF
 else
   cat <<EOF
 

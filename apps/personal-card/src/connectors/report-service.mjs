@@ -95,17 +95,29 @@ export class ReportService {
       );
     }
 
-    const orderedEvents = [...events].sort((left, right) =>
+    // A successful connection is a grant receipt, not evidence that the agent
+    // actually used or understood the Personal Model. Reports begin only with
+    // observable post-connection tool activity.
+    const reportableEvents = events.filter(
+      (event) =>
+        event.eventType !== "connector/connected"
+        && event.tool !== "connectAgent",
+    );
+    if (reportableEvents.length === 0) {
+      return Object.freeze([]);
+    }
+
+    const orderedEvents = [...reportableEvents].sort((left, right) =>
       left.occurredAt.localeCompare(right.occurredAt)
     );
     const evidenceRefs = unique(orderedEvents.map(({ receipt }) => receipt));
     const readEvents = orderedEvents.filter(isContextReadEvent);
     const contextTypes = unique(readEvents.map(contextTypeForEvent));
     const outcomes = unique(orderedEvents.flatMap(recordedOutcomeForEvent));
-    const updatedAt = events.reduce(
+    const updatedAt = orderedEvents.reduce(
       (latest, event) =>
         event.occurredAt > latest ? event.occurredAt : latest,
-      events[0].occurredAt,
+      orderedEvents[0].occurredAt,
     );
     const connectorName = connectorDisplayName(session.connectorId);
     const sections = [

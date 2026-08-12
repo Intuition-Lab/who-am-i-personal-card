@@ -200,6 +200,7 @@ test("native app preserves the original V5 interaction surfaces without a WebVie
   );
 
   for (const surface of [
+    "NativeOpeningDossier",
     "NativeHeroCard",
     "NativeCardMaterial",
     "NativeNowPanel",
@@ -239,6 +240,13 @@ test("native app preserves the original V5 interaction surfaces without a WebVie
     assert.match(nativeUI, new RegExp(`struct ${surface}`));
   }
 
+  assert.match(nativeUI, /Text\("WHO AM I"\)/);
+  assert.match(nativeUI, /Text\("tap to open"\)/);
+  assert.match(nativeUI, /\.frame\(width: 290, height: 388\)/);
+  assert.match(
+    nativeUI,
+    /let panelHeight = max\(430, min\(526, geometry\.size\.height - 112\)\)/,
+  );
   assert.match(nativeUI, /\.frame\(width: 320, height: 470\.588235\)/);
   assert.match(nativeUI, /ForEach\(0\.\.<46/);
   assert.match(nativeUI, /NativeSharePill\(label: "My Page · Identity ↗", emphasized: true\)/);
