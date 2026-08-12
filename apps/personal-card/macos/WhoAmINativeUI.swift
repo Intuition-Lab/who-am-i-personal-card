@@ -1082,19 +1082,28 @@ final class PersonalModelAppState: ObservableObject {
                 openRewind(dayID: matchingDay.id)
                 return
             }
+            if !isQuestion {
+                searchQuery = query
+                await search()
+                return
+            }
         }
 
         question = query
         askIsReflection = isConfiding && !isQuestion
         isAskOpen = true
         await ask()
-        question = ""
+        if askPhase != .failure {
+            question = ""
+        }
     }
 
     func submitAsk() async {
         askIsReflection = false
         if question.trimmedNonEmpty == nil {
-            let prompts = snapshot?.now?.items ?? []
+            let prompts = (snapshot?.now?.items ?? []).filter { item in
+                !item.isFutureLike || item.hasReliableSuggestionSource
+            }
             if !prompts.isEmpty {
                 let item = prompts[askPromptIndex % prompts.count]
                 answer = [item.displayTitle, item.why?.trimmedNonEmpty]
@@ -1428,6 +1437,7 @@ struct WhoAmIRootView: View {
                     && !state.isAskOpen
                     && state.shareFact == nil
                     && !state.hasEvidencePresentation
+                    && !showsOpeningDossier
             )
             .accessibilityHidden(
                 state.isMemorySkyOpen
@@ -1435,6 +1445,7 @@ struct WhoAmIRootView: View {
                     || state.isAskOpen
                     || state.shareFact != nil
                     || state.hasEvidencePresentation
+                    || showsOpeningDossier
             )
             if state.selectedSection != .card
                 && state.selectedSection != .connectors
@@ -2215,7 +2226,7 @@ private struct NativeOpeningDossier: View {
         .onTapGesture { open() }
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)
-        .accessibilityLabel("Open (snapshot.model.displayName) Personal Card")
+        .accessibilityLabel("Open \(snapshot.model.displayName) Personal Card")
         .accessibilityHint("Opens the Personal Card workspace")
         .accessibilityAction { open() }
     }
@@ -2611,9 +2622,11 @@ private struct NativeHeroCard: View {
             case .left, .up:
                 selectedFaceID = faces[(current - 1 + faces.count) % faces.count].id
                 rootSelected = false
+                guideDone = true
             case .right, .down:
                 selectedFaceID = faces[(current + 1) % faces.count].id
                 rootSelected = false
+                guideDone = true
             default:
                 break
             }
@@ -2814,7 +2827,7 @@ private struct NativeHeroCard: View {
                 .buttonStyle(.plain)
                 .position(x: cardWidth * 0.5, y: cardHeight * 0.44)
                 .accessibilityLabel("ROOT · 我是谁")
-                if !guideDone {
+                if flipped && !guideDone {
                     NativeGuideRing()
                         .position(x: cardWidth * 0.5, y: cardHeight * 0.44)
                 }
@@ -2966,9 +2979,13 @@ private struct NativeHeroCard: View {
                                 if !metadata.detail.isEmpty { Text(metadata.detail).lineLimit(1) }
                                 Spacer()
                                 Button("出处") {
-                                    selectedFaceID = nil
-                                    flipped = false
-                                    state.openRewind(dayID: snapshot.time?.days?.first?.id)
+                                    if let reference = selectedFace.evidenceRefs?.first?.trimmedNonEmpty {
+                                        Task { await state.loadEvidence(reference) }
+                                    } else {
+                                        selectedFaceID = nil
+                                        flipped = false
+                                        state.openRewind(dayID: snapshot.time?.days?.first?.id)
+                                    }
                                 }
                                 Button("改写") { correction = selectedFace.text }
                                 Button("行动") { state.selectedSection = .connectors }
@@ -3330,14 +3347,17 @@ private struct NativeNowPanel: View {
                 )
         }
         .background {
-            NativeCSSBoxShadow(
-                boxSize: CGSize(width: 620, height: 325),
-                cornerRadius: 19,
-                color: .black.opacity(0.38),
-                blurRadius: 46,
-                spread: -30,
-                offset: CGSize(width: 0, height: 30)
-            )
+            GeometryReader { proxy in
+                NativeCSSBoxShadow(
+                    boxSize: proxy.size,
+                    cornerRadius: 19,
+                    color: .black.opacity(0.38),
+                    blurRadius: 46,
+                    spread: -30,
+                    offset: CGSize(width: 0, height: 30)
+                )
+                .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+            }
         }
         .onChange(of: state.searchFocusRequest) { _ in
             searchFocused = true
@@ -4210,8 +4230,7 @@ private struct NativeMemorySky: View {
                         source: evidence?.source ?? theme.face.source ?? "Personal Model",
                         reference: evidence?.reference
                             ?? (bright ? faceReference : nil),
-                        dayID: evidence?.dayID
-                            ?? (bright ? snapshot.time?.days?.first?.id : nil),
+                        dayID: evidence?.dayID,
                         shareKind: evidence == nil ? "FACE" : "EVIDENCE",
                         shareText: evidence?.title ?? theme.face.text,
                         shareMeta: evidence.map {
@@ -4538,8 +4557,9 @@ private struct NativeMemorySky: View {
                             Text(theme.face.text)
                                 .font(.system(size: 12.5, weight: .semibold))
                                 .foregroundStyle(theme.color)
-                                .lineLimit(1)
-                                .fixedSize(horizontal: true, vertical: false)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: 260)
                                 .shadow(color: .black.opacity(0.9), radius: 5, y: 1)
                             Text("\(theme.face.observations ?? 0) observations")
                                 .font(.system(size: 8.5, design: .monospaced))
@@ -4886,11 +4906,16 @@ private struct NativeAskOverlay: View {
     @State private var correction = ""
 
     private var placeholder: String {
-        snapshot.now?.items?.first?.displayTitle
+        snapshot.now?.items?
+            .first { !$0.isFutureLike || $0.hasReliableSuggestionSource }?
+            .displayTitle
             ?? "想说什么，也可以直接说。"
     }
 
     private var answerMeta: String {
+        if state.askPhase == .failure {
+            return "Personal Model · 暂时没有找到相关证据"
+        }
         if state.askIsReflection {
             return "倾诉 · 只返回观察，不替你做决定"
         }
@@ -5003,9 +5028,22 @@ private struct NativeAskOverlay: View {
                     case .loading:
                         Text("正在从你的 Personal Model 里找答案…")
                     case .failure:
-                        Text(state.askErrorMessage ?? "这次没有回答成功。恢复本机 Personal Model 连接后再试一次。")
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(state.askErrorMessage ?? "这次没有回答成功。恢复本机 Personal Model 连接后再试一次。")
+                            Button("重试 Ask") { Task { await state.ask() } }
+                                .buttonStyle(.bordered)
+                                .disabled(state.question.trimmedNonEmpty == nil)
+                        }
                     case .success, .insufficient:
-                        Text(state.askResponse?.answer ?? state.answer)
+                        if let response = state.askResponse {
+                            NativeAskAnswer(
+                                state: state,
+                                response: response,
+                                isEvidenceInsufficient: state.askPhase == .insufficient
+                            )
+                        } else {
+                            Text(state.answer)
+                        }
                     case .idle, .empty:
                         Text(state.answer)
                     }
@@ -5021,11 +5059,16 @@ private struct NativeAskOverlay: View {
                     Text(answerMeta)
                         .lineLimit(1)
                     Button("不对，改写 →") {
-                        correction = state.askResponse?.answer ?? state.answer
-                        correctionFocused = true
+                        let seed = state.askResponse?.answer ?? state.answer
+                        guard !seed.isEmpty else { return }
+                        correction = seed
+                        DispatchQueue.main.async { correctionFocused = true }
                     }
                     .buttonStyle(.plain)
-                    .disabled(state.askPhase == .loading)
+                    .disabled(
+                        state.askPhase == .loading
+                            || (state.askResponse?.answer ?? state.answer).isEmpty
+                    )
                 }
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(nativeHexColor("#AEAEB2"))
@@ -5183,7 +5226,11 @@ private struct NativeNowRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            NativeActivityIcon(text: "Personal Model")
+            NativeActivityIcon(
+                text: [item.app, item.title, item.why]
+                    .compactMap { $0?.trimmedNonEmpty }
+                    .joined(separator: " ")
+            )
                 .frame(width: 34, alignment: .leading)
                 .offset(y: 1)
             HStack(spacing: 6) {
@@ -6040,11 +6087,8 @@ private struct NativeRewindView: View {
                     .padding(.horizontal, 30)
                     .padding(.top, 24)
                     .padding(.bottom, 26)
-                    .frame(
-                        width: panelWidth,
-                        height: panelHeight,
-                        alignment: .topLeading
-                    )
+                    .frame(width: panelWidth, alignment: .topLeading)
+                    .frame(minHeight: panelHeight, alignment: .topLeading)
                     .background {
                         ZStack {
                             RoundedRectangle(cornerRadius: 22, style: .continuous)
