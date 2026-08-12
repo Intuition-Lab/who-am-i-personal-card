@@ -148,7 +148,7 @@ test("production creates and restores the downloader's own Personal Model identi
   assert.equal(eventEvidence.body.evidence.source.application, "Notes");
   assert.equal(
     eventEvidence.body.evidence.source.originalTime,
-    "2026-08-07T09:00:00+08:00",
+    new Date("2026-08-07T09:00").toISOString(),
   );
   assert.equal(
     eventEvidence.body.evidence.supports[0].relationship,
@@ -163,6 +163,7 @@ test("production creates and restores the downloader's own Personal Model identi
   );
   assert.equal(faceEvidence.status, 200);
   assert.equal(faceEvidence.body.evidence.source.type, "derived-summary");
+  assert.equal(faceEvidence.body.evidence.availability.status, "available");
   assert.equal(faceEvidence.body.evidence.supports[0].relationship, "indirect");
   assert.equal(
     faceEvidence.body.evidence.content.lineage[0].reference.startsWith(
