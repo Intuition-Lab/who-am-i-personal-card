@@ -22,6 +22,12 @@ export const PERSONAL_MODEL_EVIDENCE_SCHEMA_ID = personalModelEvidenceSchema.$id
 export const PERSONAL_MODEL_CORRECTION_SCHEMA_ID =
   personalModelCorrectionSchema.$id;
 
+// Producers filter their own references before emitting a Snapshot. Derive the
+// bound from the schema so the two can never drift apart.
+export const MINIMUM_SOURCE_REF_LENGTH =
+  personalModelCardSchema.$defs.contentMetadata.properties.sourceRefs.items
+    .minLength;
+
 const ajv = new Ajv2020({
   allErrors: true,
   strict: true,

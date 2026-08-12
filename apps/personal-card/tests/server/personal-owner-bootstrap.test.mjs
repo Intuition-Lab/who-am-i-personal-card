@@ -28,11 +28,12 @@ async function waitForServer(baseUrl, child) {
   throw new Error("Timed out waiting for the Personal Card test server.");
 }
 
-function startServer(port, cardDataDir, persomeRoot) {
+function startServer(port, cardDataDir, persomeRoot, extraEnv = {}) {
   return spawn(process.execPath, ["persome-card-server.mjs"], {
     cwd: projectRoot,
     env: {
       ...process.env,
+      ...extraEnv,
       NODE_ENV: "production",
       WHOAMI_DEV_MODE: "0",
       WHOAMI_TEST_MODE: "1",
@@ -225,4 +226,61 @@ test("production creates and restores the downloader's own Personal Model identi
     restarted.body.snapshot.personalModel.faces[0].text,
     replacement,
   );
+});
+
+test("a live activity block without an evidence ref still yields a valid Snapshot", async (t) => {
+  await chmod(fakePersome, 0o755);
+  const root = await mkdtemp(join(tmpdir(), "whoami-live-block-"));
+  const cardDataDir = join(root, "card-data");
+  const persomeRoot = join(root, "persome");
+  await mkdir(persomeRoot, { recursive: true });
+  await writeFile(join(persomeRoot, "config.toml"), "[mcp]\ntransport='stdio'\n");
+  await writeFile(join(persomeRoot, "index.db"), "");
+  const port = 24000 + (process.pid % 5000);
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const child = startServer(port, cardDataDir, persomeRoot, {
+    FAKE_PERSOME_LIVE_BLOCK: "1",
+  });
+  t.after(async () => stopServer(child));
+  await waitForServer(baseUrl, child);
+
+  let cookie = "";
+  async function request(path, options = {}) {
+    const headers = { ...(options.headers || {}) };
+    if (cookie) headers.Cookie = cookie;
+    const response = await fetch(`${baseUrl}${path}`, { ...options, headers });
+    const setCookie = response.headers.get("set-cookie");
+    if (setCookie) cookie = setCookie.split(";", 1)[0];
+    return { status: response.status, body: await response.json() };
+  }
+
+  const saved = await request("/api/setup/profile", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      displayName: "Mira",
+      handle: "@mira",
+      tagline: "MIRA_LIVE_BLOCK_9F30",
+      description: "MIRA_LIVE_BLOCK_IDENTITY_9F30",
+    }),
+  });
+  assert.equal(saved.status, 200);
+
+  // A live block produces an event with no evidenceRef. Leaking that undefined
+  // into sourceRefs fails Card contract validation, which the Provider reports
+  // as LOCAL_PROVIDER_UNAVAILABLE — the whole Card goes blank over one missing
+  // reference.
+  const bootstrap = await request("/api/model/bootstrap");
+  assert.equal(bootstrap.status, 200);
+  assert.equal(bootstrap.body.ok, true);
+
+  for (const item of bootstrap.body.snapshot.now?.items ?? []) {
+    for (const reference of item.metadata?.sourceRefs ?? []) {
+      assert.equal(
+        typeof reference,
+        "string",
+        `sourceRefs carried a ${typeof reference} for now item ${item.id}`,
+      );
+    }
+  }
 });
