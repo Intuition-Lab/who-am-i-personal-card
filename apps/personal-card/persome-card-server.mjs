@@ -24,6 +24,7 @@ import {
   LocalPersomeContentBackend,
   normalizeSearchOptions,
 } from "./src/content/personal-model-content-backend.mjs";
+import { MINIMUM_SOURCE_REF_LENGTH } from "./src/contracts/personal-model-card.mjs";
 import { LocalPersomeProvider } from "./src/providers/local-persome-provider.mjs";
 import { ProviderRegistry } from "./src/providers/provider-registry.mjs";
 import { OWNER_SCOPES } from "./src/auth/scope-policy.mjs";
@@ -2534,12 +2535,16 @@ async function loadLocalOwnerSnapshot(profile) {
       Date.parse(nowGeneratedAt) - 7 * 24 * 60 * 60 * 1000,
     ).toISOString();
     // An event without an evidenceRef would otherwise put undefined into
-    // sourceRefs, and the Card contract requires every entry to be a string.
-    // Filter before slicing so a missing ref cannot displace a usable one.
+    // sourceRefs, and the Card contract requires every entry to be a string of
+    // at least MINIMUM_SOURCE_REF_LENGTH. Drop anything the contract would
+    // reject rather than fail the whole Snapshot over one reference, and
+    // filter before slicing so a missing ref cannot displace a usable one.
     const nowSourceRefs = [...new Set(
       days.flatMap((day) => day.events.map((event) => event.evidenceRef)),
     )]
-      .filter((ref) => typeof ref === "string" && ref)
+      .filter((ref) =>
+        typeof ref === "string" && ref.length >= MINIMUM_SOURCE_REF_LENGTH
+      )
       .slice(0, 6);
     const nowItems = (Array.isArray(live.nowItems) ? live.nowItems : [])
       .filter((item) => item?.title)
