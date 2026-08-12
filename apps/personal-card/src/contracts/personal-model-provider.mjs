@@ -4,6 +4,7 @@ export const PERSONAL_MODEL_PROVIDER_METHODS = Object.freeze([
   "getCurrentContext",
   "search",
   "getEvidence",
+  "jot",
   "correct",
   "connectAgent",
   "listAgentReports",
@@ -79,6 +80,10 @@ export class PersonalModelProvider {
 
   async getEvidence() {
     throw this.unsupported("getEvidence");
+  }
+
+  async jot() {
+    throw this.unsupported("jot");
   }
 
   async correct() {

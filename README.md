@@ -3,6 +3,11 @@
 Installable macOS product built on the
 [Persome Personal Model Runtime](https://github.com/Intuition-Lab/personal-model).
 
+The current product definition and acceptance criteria live in the
+[Persome MVP PRD](docs/persome-mvp-prd.md). Its window model is explicit:
+launch into the standalone Spotlight, then expand into a frameless Dashboard
+whose home is Personal Card + the same Spotlight.
+
 Each downloader connects the same UI to the Personal Model owned by that macOS
 account. A secure existing standalone Runtime is reused automatically; a new
 Runtime and stable local Personal Card identity are created only when needed.

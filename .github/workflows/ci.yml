@@ -55,7 +55,10 @@ jobs:
           CHROME_PATH: /usr/bin/google-chrome
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
+          npm run typecheck
+          npm run build:renderer
           npm test
+          npm run test:electron-renderer
           npm run test:browser
           npm run test:production-browser
           npm run test:production-no-demo
@@ -189,6 +192,29 @@ jobs:
       - name: Validate installer plan
         shell: bash
         run: bash install.sh --print-plan
+
+      - name: Build the Persome Electron app
+        working-directory: apps/personal-card
+        shell: bash
+        env:
+          EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
+        run: |
+          npm ci --no-audit --no-fund
+          npm run typecheck
+          npm run test:electron-shell
+          npm run pack:electron
+          app="$(find dist -maxdepth 3 -type d -name 'Persome.app' -print -quit)"
+          test -n "${app}"
+          test -x "${app}/Contents/MacOS/Persome"
+          test -f "${app}/Contents/Resources/product-installer/runtime.lock"
+          test -f "${app}/Contents/Resources/product-installer/install.sh"
+          test "$(lipo -archs "${app}/Contents/MacOS/Persome")" = \
+            "${EXPECTED_ARCHITECTURE}"
+          test "$(plutil -extract CFBundleIdentifier raw -o - \
+            "${app}/Contents/Info.plist")" = "ai.intuition.persome"
+          test "$(plutil -extract CFBundleShortVersionString raw -o - \
+            "${app}/Contents/Info.plist")" = \
+            "$(tr -d '[:space:]' < ../../VERSION)"
 
       - name: Build universal native app launcher
         shell: bash

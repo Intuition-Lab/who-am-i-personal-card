@@ -433,6 +433,18 @@ export class RemotePersonalModelProvider extends PersonalModelProvider {
     return response;
   }
 
+  async jot(modelId, text, grant, options = {}) {
+    assertSafeModelId(modelId);
+    return assertBoundObject(
+      await this.request(`models/${encodeURIComponent(modelId)}/memories`, {
+        method: "POST",
+        body: { content: text, source: "persome-jot" },
+        signal: options.signal,
+      }),
+      modelId,
+    );
+  }
+
   async connectAgent(modelId, connectorId, grant, options = {}) {
     assertSafeModelId(modelId);
     return assertBoundObject(

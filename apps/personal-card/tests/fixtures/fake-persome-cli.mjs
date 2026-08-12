@@ -97,6 +97,13 @@ const toolResults = {
   current_context: {
     recent_timeline_blocks: [],
   },
+  correct_memory: {
+    ok: true,
+  },
+  remember: {
+    ok: true,
+    memory_id: "fake-jot-memory",
+  },
 };
 
 function modelSnapshotResult(args = {}) {
