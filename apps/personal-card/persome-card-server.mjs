@@ -2533,9 +2533,14 @@ async function loadLocalOwnerSnapshot(profile) {
     const nowRangeStart = new Date(
       Date.parse(nowGeneratedAt) - 7 * 24 * 60 * 60 * 1000,
     ).toISOString();
+    // An event without an evidenceRef would otherwise put undefined into
+    // sourceRefs, and the Card contract requires every entry to be a string.
+    // Filter before slicing so a missing ref cannot displace a usable one.
     const nowSourceRefs = [...new Set(
       days.flatMap((day) => day.events.map((event) => event.evidenceRef)),
-    )].slice(0, 6);
+    )]
+      .filter((ref) => typeof ref === "string" && ref)
+      .slice(0, 6);
     const nowItems = (Array.isArray(live.nowItems) ? live.nowItems : [])
       .filter((item) => item?.title)
       .slice(0, 6)

@@ -95,7 +95,22 @@ const toolResults = {
     ],
   },
   current_context: {
-    recent_timeline_blocks: [],
+    // A live block carries a "live-" sourceId, so the Card derives no
+    // evidenceRef for it. Opt in to reproduce that shape.
+    recent_timeline_blocks: process.env.FAKE_PERSOME_LIVE_BLOCK === "1"
+      ? [
+        {
+          start_time: `${rewindTimestamp.slice(0, 11)}11:00:00+00:00`,
+          end_time: `${rewindTimestamp.slice(0, 11)}11:20:00+00:00`,
+          apps_used: ["Notes"],
+          entries: [
+            {
+              text: `${persona.rewind} kept a quiet prototype open in Notes.`,
+            },
+          ],
+        },
+      ]
+      : [],
   },
 };
 
