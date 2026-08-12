@@ -136,11 +136,18 @@ test("reports scope without Evidence scope removes references and Evidence secti
 });
 
 test("Evidence references and connector session IDs require their own scopes", async () => {
-  const lin = await fixture("lin");
+  const input = structuredClone(await fixture("lin"));
+  input.identity.metadata = {
+    provenance: "generated",
+    sourceRefs: ["lin-demo:event:2026-08-07:01"],
+    method: "identity-summary-v2",
+  };
+  const lin = parsePersonalModelCardSnapshot(input);
   const projected = projectSnapshotByScope(
     lin,
     authorized([
       "card:read",
+      "identity:read",
       "rewind:read",
       "reports:read",
       "connectors:read",
@@ -165,6 +172,11 @@ test("Evidence references and connector session IDs require their own scopes", a
     ),
     false,
   );
+  assert.equal(
+    Object.hasOwn(projected.identity.metadata, "sourceRefs"),
+    false,
+  );
+  assert.equal(projected.identity.metadata.method, "identity-summary-v2");
   assert.equal(JSON.stringify(projected).includes("lin-demo:event:"), false);
   assert.equal(JSON.stringify(projected).includes("cs_lin_codex"), false);
 
@@ -172,6 +184,7 @@ test("Evidence references and connector session IDs require their own scopes", a
     lin,
     authorized([
       "card:read",
+      "identity:read",
       "rewind:read",
       "evidence:read",
       "connectors:read",
@@ -190,6 +203,9 @@ test("Evidence references and connector session IDs require their own scopes", a
     ),
     true,
   );
+  assert.deepEqual(evidenceAllowed.identity.metadata.sourceRefs, [
+    "lin-demo:event:2026-08-07:01",
+  ]);
   assert.equal(
     evidenceAllowed.connectors.find(({ id }) => id === "codex").sessionId,
     "cs_lin_codex",

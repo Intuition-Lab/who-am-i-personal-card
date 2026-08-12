@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import {
   createModelRequestContext,
   GrantTokenService,
+  requireScope,
   SessionModelService,
   ViewerSessionStore,
 } from "./src/auth/index.mjs";
@@ -18,11 +19,17 @@ import { ConnectorEventStore } from "./src/connectors/connector-event-store.mjs"
 import { ConnectorSessionService } from "./src/connectors/connector-session-service.mjs";
 import { ReportService } from "./src/connectors/report-service.mjs";
 import { EvidenceService } from "./src/evidence/evidence-service.mjs";
+import {
+  buildGroundedAnswer,
+  LocalPersomeContentBackend,
+  normalizeSearchOptions,
+} from "./src/content/personal-model-content-backend.mjs";
 import { LocalPersomeProvider } from "./src/providers/local-persome-provider.mjs";
 import { ProviderRegistry } from "./src/providers/provider-registry.mjs";
 import { OWNER_SCOPES } from "./src/auth/scope-policy.mjs";
 import { existingPersonalModelProfile } from "./src/setup/existing-personal-model-profile.mjs";
 import { OwnerProfileStore } from "./src/setup/owner-profile-store.mjs";
+import { managedRuntimeIdentityMatches } from "./src/setup/runtime-identity.mjs";
 
 const CARD_ROOT = dirname(fileURLToPath(import.meta.url));
 const PRODUCT_VERSION = (() => {
@@ -54,6 +61,8 @@ const OBSERVABLE_MCP_NAME = "persome";
 const LEGACY_OBSERVABLE_MCP_NAME = "whoami-personal-model";
 const DEV_MODE = process.env.WHOAMI_DEV_MODE !== "0" && process.env.NODE_ENV !== "production";
 const TEST_MODE = process.env.WHOAMI_TEST_MODE === "1";
+const DEFAULT_PERSOME_TIMEOUT_MS = 20_000;
+const SEARCH_PERSOME_TIMEOUT_MS = 180_000;
 const GRANT_AUDIENCE = "personal-card-v5";
 const GRANT_SECRET = process.env.WHOAMI_GRANT_SECRET || randomBytes(48);
 const PERSOME_ROOT = process.env.PERSOME_ROOT || resolve(homedir(), ".persome");
@@ -100,6 +109,8 @@ const reportService = new ReportService({
 const evidenceService = new EvidenceService({
   providerRegistry,
   sessionService: connectorSessionService,
+  eventStore: connectorEventStore,
+  loadCoastFrame: loadCoastFrameContent,
 });
 const activeConnectorSessions = new Map();
 
@@ -181,21 +192,45 @@ function managedRuntimeIdentityReady(cliPath) {
     return false;
   }
   try {
-    const expected = readFileSync(managementLock, "utf8");
-    return readFileSync(externalReceipt, "utf8") === expected
-      && readFileSync(internalReceipt, "utf8") === expected;
+    return managedRuntimeIdentityMatches({
+      managementLockText: readFileSync(managementLock, "utf8"),
+      externalReceiptText: readFileSync(externalReceipt, "utf8"),
+      internalReceiptText: readFileSync(internalReceipt, "utf8"),
+    });
   } catch {
     return false;
   }
 }
 
 function ownerProviderFor(profile) {
+  const contentBackend = new LocalPersomeContentBackend({
+    connectPersome,
+    ownerAskUrl: WHO_AM_I_URL,
+  });
   return new LocalPersomeProvider({
     modelIds: [profile.modelId],
     loadSnapshot: () => loadLocalOwnerSnapshot(profile),
     operations: {
-      jot: async ({ text }) => writeLocalJot(text),
-      correct: async ({ correction }) => writeLocalCorrection(correction),
+      search: ({ modelId, query, options }) =>
+        contentBackend.search({ modelId, query, options }),
+      ask: ({ modelId, question, displayName, options }) =>
+        contentBackend.ask({ modelId, question, displayName, options }),
+      getEvidence: ({ modelId, reference }) =>
+        contentBackend.getEvidence({ modelId, reference }),
+      // A jot writes new memory, so the cached grounded content for this model
+      // is stale the moment it lands.
+      jot: async ({ modelId, text }) => {
+        const result = await writeLocalJot(text);
+        contentBackend.invalidate(modelId);
+        return result;
+      },
+      correct: async ({ modelId, correction }) => {
+        const result = await writeLocalCorrection(correction);
+        contentBackend.invalidate(modelId);
+        return result;
+      },
+      resolveEvidence: async ({ modelId, reference }) =>
+        resolveLocalEvidence(modelId, reference),
     },
   });
 }
@@ -427,25 +462,29 @@ class PersomeMcpClient {
   }
 
   callTool(name, args) {
-    return this.call("tools/call", { name, arguments: args });
+    return this.call(
+      "tools/call",
+      { name, arguments: args },
+      name === "search" ? SEARCH_PERSOME_TIMEOUT_MS : DEFAULT_PERSOME_TIMEOUT_MS,
+    );
   }
 
   async notify(method, params) {
     await this.post({ jsonrpc: "2.0", method, params });
   }
 
-  async call(method, params) {
+  async call(method, params, timeoutMs = DEFAULT_PERSOME_TIMEOUT_MS) {
     const message = await this.post({
       jsonrpc: "2.0",
       id: this.nextId++,
       method,
       params,
-    });
+    }, timeoutMs);
     if (message.error) throw new Error(message.error.message || `Persome 调用失败：${method}`);
     return message.result;
   }
 
-  async post(payload) {
+  async post(payload, timeoutMs = DEFAULT_PERSOME_TIMEOUT_MS) {
     const headers = {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
@@ -459,7 +498,7 @@ class PersomeMcpClient {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(12000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const sessionId = response.headers.get("mcp-session-id");
     if (sessionId) this.sessionId = sessionId;
@@ -534,7 +573,11 @@ class PersomeStdioClient {
   }
 
   callTool(name, args) {
-    return this.call("tools/call", { name, arguments: args });
+    return this.call(
+      "tools/call",
+      { name, arguments: args },
+      name === "search" ? SEARCH_PERSOME_TIMEOUT_MS : DEFAULT_PERSOME_TIMEOUT_MS,
+    );
   }
 
   notify(method, params) {
@@ -543,14 +586,14 @@ class PersomeStdioClient {
     return Promise.resolve();
   }
 
-  call(method, params) {
+  call(method, params, timeoutMs = DEFAULT_PERSOME_TIMEOUT_MS) {
     this.start();
     const id = this.nextId++;
     return new Promise((resolveCall, rejectCall) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         rejectCall(new Error(`Persome 调用超时：${method}`));
-      }, 20000);
+      }, timeoutMs);
       this.pending.set(id, { resolve: resolveCall, reject: rejectCall, timer });
       this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
     });
@@ -898,6 +941,35 @@ async function coastFramesForDay(key) {
   } catch {
     return [];
   }
+}
+
+function secureCoastImagePath(value) {
+  const imagePath = resolve(String(value || ""));
+  const imageRoot = resolve("/tmp/coast-cli");
+  if (
+    !imagePath.startsWith(`${imageRoot}${sep}`)
+    || extname(imagePath).toLowerCase() !== ".png"
+  ) {
+    return "";
+  }
+  try {
+    const file = lstatSync(imagePath);
+    return file.isFile() && !file.isSymbolicLink() ? imagePath : "";
+  } catch {
+    return "";
+  }
+}
+
+async function loadCoastFrameContent({ frameId }) {
+  const { stdout } = await runCoast([
+    "query", "image", "--id", String(frameId), "--crop",
+  ], 15000);
+  const imagePath = secureCoastImagePath(stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean) || "");
+  if (!imagePath) return null;
+  return { imagePath };
 }
 
 async function attachCoastFrames(live, modelId = ownerProfile?.modelId || "local-owner") {
@@ -1422,24 +1494,6 @@ function buildLivePayload(activity, current) {
   };
 }
 
-function compactOwnerAnswer(value) {
-  const lines = String(value || "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const short = lines.find((line) => line.startsWith("我的短回答："));
-  const patternIndex = lines.findIndex((line) => line === "我用到的模式：");
-  const memoryIndex = lines.findIndex((line) => line === "相关记忆：");
-  const pattern = patternIndex >= 0 ? lines.slice(patternIndex + 1).find((line) => line.startsWith("- ")) : "";
-  const memory = memoryIndex >= 0 ? lines.slice(memoryIndex + 1).find((line) => line.startsWith("- ")) : "";
-  const pieces = [
-    short || lines.find((line) => !line.startsWith("你问的是：")) || "",
-    memory ? `相关记忆：${cleanModelText(memory.replace(/^-\s*/, ""), 260)}` : "",
-    !memory && pattern ? `模型依据：${cleanModelText(pattern.replace(/^-\s*/, ""), 220)}` : "",
-  ].filter(Boolean);
-  return pieces.join("\n\n") || "Persome 已连接，但这次没有找到足够清晰的依据。";
-}
-
 function allowedRequest(req) {
   const origin = String(req.headers.origin || "");
   return !origin || origin === `http://${CARD_HOST}:${CARD_PORT}` || origin === `http://localhost:${CARD_PORT}`;
@@ -1525,9 +1579,11 @@ async function personalModelSetupStatus() {
   );
   let initialized = false;
   let buildStatus = "unavailable";
+  let hasUsableModel = false;
   if (DEV_MODE) {
     initialized = true;
     buildStatus = "development";
+    hasUsableModel = true;
   } else if (installed) {
     let client;
     try {
@@ -1540,9 +1596,19 @@ async function personalModelSetupStatus() {
       initialized = snapshot?.projection_schema_version === 1
         || snapshot?.schema_version === 1;
       buildStatus = String(snapshot?.build?.status || "not_built");
+      const modelStats = snapshot?.model_stats || {};
+      hasUsableModel = Boolean(
+        snapshot?.root?.id
+        || snapshot?.root?.signature
+        || (Array.isArray(snapshot?.faces) && snapshot.faces.length > 0)
+        || Number(modelStats.roots) > 0
+        || Number(modelStats.faces) > 0
+        || Number(modelStats.points) > 0,
+      );
     } catch {
       initialized = false;
       buildStatus = "unavailable";
+      hasUsableModel = false;
     } finally {
       client?.close();
     }
@@ -1568,6 +1634,7 @@ async function personalModelSetupStatus() {
       installed,
       initialized,
       buildStatus,
+      hasUsableModel,
       version: "0.3.2",
       connection: managed
         ? "product-managed"
@@ -1748,17 +1815,40 @@ async function searchActiveModel(req, res, url) {
   const body = await readJsonBody(req);
   const context = modelContext(req, res, url, body, "model:search");
   const query = String(body.query || "").trim().slice(0, 1200);
+  const searchOptions = normalizeSearchOptions(body);
   const provider = providerRegistry.resolve(context.modelId);
   const results = await provider.search(
     context.modelId,
     query,
     context.grant,
+    searchOptions,
   );
+  const sourceRefs = [...new Set(
+    results.flatMap((result) => result.sourceRefs || result.evidenceRefs || []),
+  )];
+  const method = results[0]?.method || "provider-search";
+  const degraded = method === "snapshot-keyword-search";
   sendJson(res, 200, {
     ok: true,
     modelId: context.modelId,
     revision: context.revision,
+    status: results.length ? "results" : "no_results",
     results,
+    contentType: "observed",
+    confidence: results.length
+      ? Math.max(...results.map((result) => Number(result.confidence) || 0))
+      : 0,
+    timeRange: {
+      since: searchOptions.since || null,
+      until: searchOptions.until || null,
+    },
+    generatedAt: new Date().toISOString(),
+    method,
+    degraded,
+    degradationReason: degraded
+      ? "实时语义搜索暂时不可用，当前结果来自已加载模型的关键词匹配。"
+      : null,
+    sourceRefs,
   });
 }
 
@@ -1775,34 +1865,62 @@ async function askActiveModel(req, res, url) {
     return;
   }
   const startedAt = Date.now();
+  const searchOptions = normalizeSearchOptions({
+    ...body,
+    top_k: body.top_k ?? body.topK ?? 5,
+  });
   const provider = providerRegistry.resolve(context.modelId);
-  const results = await provider.search(
-    context.modelId,
-    question,
-    context.grant,
-  );
-  const evidence = results.slice(0, 2).map((result) =>
-    cleanModelText(result.text || result.title, 240)
-  ).filter(Boolean);
-  const answer = evidence.length
-    ? `Personal Model 找到的直接依据：${evidence.join("；另一条相关内容是：")}`
-    : `${context.snapshot.model.displayName} 的 Personal Model 暂时没有找到足够清晰的依据。`;
+  let answer;
+  if (typeof provider.ask === "function") {
+    answer = await provider.ask(
+      context.modelId,
+      question,
+      context.grant,
+      {
+        ...searchOptions,
+        displayName: context.snapshot.model.displayName,
+      },
+    );
+  } else {
+    let results = [];
+    try {
+      results = await provider.search(
+        context.modelId,
+        question,
+        context.grant,
+        searchOptions,
+      );
+    } catch {
+      // A search failure becomes a safe refusal instead of a fabricated answer.
+    }
+    answer = buildGroundedAnswer({
+      modelId: context.modelId,
+      displayName: context.snapshot.model.displayName,
+      results,
+    });
+  }
   sendJson(res, 200, {
     ok: true,
-    modelId: context.modelId,
+    ...answer,
     revision: context.revision,
-    answer,
-    results,
     latencyMs: Date.now() - startedAt,
-    tools: ["search"],
   });
 }
 
 async function correctActiveModel(req, res, url) {
   const body = await readJsonBody(req);
   const context = modelContext(req, res, url, body, "model:correct");
-  const correction = String(body.correction || "").trim().slice(0, 2400);
-  if (!correction) {
+  const correction = typeof body.correction === "string"
+    ? body.correction.trim().slice(0, 2400)
+    : body.correction && typeof body.correction === "object"
+      ? {
+          ...body.correction,
+          text: String(
+            body.correction.text || body.correction.correction || "",
+          ).trim().slice(0, 2400),
+        }
+      : "";
+  if (!correction || (typeof correction === "object" && !correction.text)) {
     sendJson(res, 400, {
       ok: false,
       code: "CORRECTION_REQUIRED",
@@ -1816,17 +1934,31 @@ async function correctActiveModel(req, res, url) {
     correction,
     context.grant,
   );
-  const refreshed = context.authorization.viewerMode === "owner"
-    ? await sessionModelService.switchModel({
-        sessionId: context.sessionId,
-        modelId: context.modelId,
-        access: "owner",
-      })
-    : null;
+  if (
+    result?.status !== "applied" ||
+    result?.verification?.status !== "verified" ||
+    result?.verification?.oldConclusionDeprioritized !== true
+  ) {
+    const error = new Error(
+      "更正已被接收，但刷新后的 Personal Model 尚未确认旧结论已降级。",
+    );
+    error.code = "CORRECTION_VERIFICATION_FAILED";
+    error.status = 409;
+    throw error;
+  }
+  const refreshed = await sessionModelService.refreshModel({
+    sessionId: context.sessionId,
+    expectedRevision: context.revision,
+  });
   sendJson(res, 200, {
     ok: true,
     modelId: context.modelId,
-    revision: refreshed?.revision ?? context.revision,
+    revision: refreshed.revision,
+    receipt: result.receipt,
+    receiptSource: result.receiptSource,
+    status: result.status,
+    affected: result.affected,
+    verification: result.verification,
     result,
   });
 }
@@ -1990,6 +2122,49 @@ async function revokeModelConnector(req, res, url, connectorId) {
   });
 }
 
+async function disconnectModelConnector(req, res, url, connectorId) {
+  const body = await readJsonBody(req);
+  const context = modelContext(req, res, url, body, "connectors:connect");
+  const connectorMap = activeConnectorSessions.get(context.sessionId);
+  const connectorSessionId = connectorMap?.get(connectorId);
+  if (!connectorSessionId) {
+    const error = new Error("The Connector is not connected in this session.");
+    error.code = "CONNECTOR_SESSION_NOT_FOUND";
+    error.status = 404;
+    throw error;
+  }
+  const connectorSession = connectorSessionService.resolve(
+    connectorSessionId,
+    {
+      viewerSessionId: context.sessionId,
+      modelId: context.modelId,
+      connectorId,
+      requiredScope: "connectors:connect",
+    },
+  );
+  const event = await connectorEventStore.appendEvent(connectorSession, {
+    eventType: "connector/disconnected",
+    tool: "disconnectAgent",
+    summary: `${connectorId} disconnected from ${context.modelId}`,
+  });
+  connectorSessionService.revoke(connectorSessionId, "disconnected");
+  connectorMap.delete(connectorId);
+  if (connectorMap.size === 0) {
+    activeConnectorSessions.delete(context.sessionId);
+  }
+  sendJson(res, 200, {
+    ok: true,
+    modelId: context.modelId,
+    revision: context.revision,
+    connector: {
+      connectorId,
+      status: "available",
+      sessionId: connectorSessionId,
+    },
+    event,
+  });
+}
+
 async function serveModelReports(req, res, url) {
   const context = modelContext(req, res, url, undefined, "reports:read");
   const provider = providerRegistry.resolve(context.modelId);
@@ -2059,6 +2234,82 @@ async function serveModelEvidence(req, res, url, pathReference) {
     revision: context.revision,
     evidence,
   });
+}
+
+async function serveModelRewindFrames(req, res, url) {
+  const context = modelContext(req, res, url, undefined, "rewind:read");
+  requireScope(context.authorization, "evidence:read");
+  const dayId = String(url.searchParams.get("day") || "");
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(dayId)
+    || !context.snapshot.time?.days?.some((day) => day.id === dayId)
+  ) {
+    sendJson(res, 404, {
+      ok: false,
+      code: "REWIND_DAY_NOT_FOUND",
+      error: "这一天不在当前 Personal Model 的 Rewind 中",
+    });
+    return;
+  }
+
+  const frames = await coastFramesForDay(dayId);
+  const responseFrames = frames.map((frame) => {
+    const frameId = String(frame.id);
+    evidenceService.allowCoastFrame({
+      viewerSessionId: context.sessionId,
+      modelId: context.modelId,
+      frameId,
+    });
+    return {
+      reference: `${context.modelId}:coast:${frameId}`,
+      time: frame.time,
+      app: frame.app,
+      title: frame.title,
+      duration: frame.duration,
+      color: frame.color,
+      timestamp: frame.timestamp,
+    };
+  });
+  sendJson(res, 200, {
+    ok: true,
+    modelId: context.modelId,
+    revision: context.revision,
+    dayId,
+    source: responseFrames.length
+      ? `Coast · ${responseFrames.length} 个代表画面`
+      : "Coast · 当天没有可用画面",
+    frames: responseFrames,
+  });
+}
+
+async function serveModelRewindFrame(req, res, url) {
+  const context = modelContext(req, res, url, undefined, "evidence:read");
+  requireScope(context.authorization, "rewind:read");
+  const reference = String(url.searchParams.get("reference") || "");
+  const evidence = await evidenceService.getCoastFrame({
+    viewerSessionId: context.sessionId,
+    activeModelId: context.modelId,
+    reference,
+  });
+  const imagePath = secureCoastImagePath(evidence.content?.imagePath);
+  if (!imagePath) {
+    sendJson(res, 404, {
+      ok: false,
+      code: "COAST_FRAME_NOT_FOUND",
+      error: "这个画面已不可用",
+    });
+    return;
+  }
+  const image = await readFile(imagePath);
+  res.writeHead(200, {
+    "Content-Type": "image/png",
+    "Content-Length": image.length,
+    "Cache-Control": "private, max-age=300",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    ...(res.whoamiSetCookie ? { "Set-Cookie": res.whoamiSetCookie } : {}),
+  });
+  res.end(image);
 }
 
 async function bootstrapPersome(res) {
@@ -2147,16 +2398,151 @@ function modelEvidenceRef(modelId, kind, value) {
   return `${modelId}:${kind}:${safe}`;
 }
 
+function runtimeReferenceFromModelEvidence(modelId, reference) {
+  const prefix = `${modelId}:`;
+  if (!String(reference).startsWith(prefix)) return "";
+  const partitioned = String(reference).slice(prefix.length);
+  const separator = partitioned.indexOf(":");
+  return separator >= 0 ? partitioned.slice(separator + 1) : "";
+}
+
+function modelBoundRuntimeReference(modelId, source) {
+  const reference = String(source?.reference || source?.id || "").trim();
+  const kind = String(source?.kind || "source")
+    .replace(/[^A-Za-z0-9_-]+/g, "-") || "source";
+  return reference ? `${modelId}:${kind}:${reference}` : null;
+}
+
+async function resolveLocalEvidence(modelId, reference) {
+  const runtimeReference = runtimeReferenceFromModelEvidence(
+    modelId,
+    reference,
+  );
+  if (!runtimeReference) return null;
+  const client = await connectPersome();
+  try {
+    const result = parseToolJson(
+      await client.callTool("resolve_evidence", {
+        reference: runtimeReference,
+      }),
+    );
+    const kind = String(result.kind || "unknown");
+    const status = String(result.status || "missing");
+    const summary = String(result.summary || "").trim();
+    const timestamp = String(
+      result.metadata?.occurred_at || result.timestamp || "",
+    ).trim();
+    const validTimestamp = Number.isFinite(Date.parse(timestamp));
+    const normalizedTimestamp = validTimestamp
+      ? new Date(timestamp).toISOString()
+      : null;
+    if (
+      kind === "unknown" ||
+      status === "missing" ||
+      !summary
+    ) {
+      return null;
+    }
+
+    const isActivityMemory = kind === "memory"
+      && /^event-/u.test(String(result.path || ""));
+    const rawKind = isActivityMemory
+      ? "persome-activity"
+      : kind === "memory"
+        ? "persome-memory"
+      : ["activity", "capture"].includes(kind) &&
+          status !== "metadata_only"
+        ? "persome-activity"
+        : null;
+    if (rawKind && !validTimestamp) return null;
+    const sourceType = rawKind || "derived-summary";
+    const lineage = (Array.isArray(result.sources) ? result.sources : [])
+      .map((source) => ({
+        relation: String(source.relation || "lineage"),
+        kind: String(source.kind || "source"),
+        reference: modelBoundRuntimeReference(modelId, source),
+        label: String(source.label || ""),
+        timestamp:
+          typeof source.timestamp === "string" ? source.timestamp : null,
+      }))
+      .filter(({ reference: sourceReference }) => sourceReference);
+    const history = (Array.isArray(result.history) ? result.history : [])
+      .map((entry) => ({
+        relation: String(entry.relation || "history"),
+        kind: String(entry.kind || "source"),
+        reference: modelBoundRuntimeReference(modelId, entry),
+        label: String(entry.label || ""),
+        timestamp:
+          typeof entry.timestamp === "string" ? entry.timestamp : null,
+      }))
+      .filter(({ reference: historyReference }) => historyReference);
+    return {
+      modelId,
+      reference,
+      source: {
+        type: sourceType,
+        originalTime: normalizedTimestamp,
+        application: String(
+          result.metadata?.app_name ||
+          result.metadata?.source_kind ||
+          "Persome",
+        ),
+        title: String(result.label || kind),
+        ...(result.id ? { recordId: String(result.id) } : {}),
+      },
+      supports: [
+        {
+          claim: summary,
+          relationship: rawKind ? "direct" : "indirect",
+        },
+      ],
+      availability: { status: "available" },
+      content: {
+        runtimeReceipt: result.canonical_reference || runtimeReference,
+        kind,
+        status,
+        summary,
+        path: result.path || null,
+        metadata:
+          result.metadata && typeof result.metadata === "object"
+            ? result.metadata
+            : {},
+        lineage,
+        history,
+      },
+      ...(result.canonical_reference
+        ? { receipt: String(result.canonical_reference) }
+        : {}),
+      ...(normalizedTimestamp ? { capturedAt: normalizedTimestamp } : {}),
+    };
+  } finally {
+    client.close();
+  }
+}
+
 async function loadLocalOwnerSnapshot(profile) {
   const client = await connectPersome();
   try {
     const modelId = profile.modelId;
     const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
     const safeTool = (name, args) => client.callTool(name, args).catch(() => null);
-    const [memoriesResult, behaviorResult, activityResult, currentResult, targets] =
+    const [
+      memoriesResult,
+      behaviorResult,
+      modelFacesResult,
+      activityResult,
+      currentResult,
+      targets,
+    ] =
       await Promise.all([
         safeTool("list_memories", {}),
         safeTool("behavior_patterns", {}),
+        safeTool("get_model_snapshot", {
+          redact: true,
+          section: "faces",
+          include_evidence_refs: true,
+          limit: 100,
+        }),
         safeTool("recent_activity", {
           since,
           limit: 120,
@@ -2174,24 +2560,36 @@ async function loadLocalOwnerSnapshot(profile) {
       ]);
     const memories = parseToolJson(memoriesResult);
     const behavior = parseToolJson(behaviorResult);
+    const modelFaces = parseToolJson(modelFacesResult);
     const activity = parseToolJson(activityResult);
     const current = parseToolJson(currentResult);
     const live = buildLivePayload(activity, current);
     const files = Array.isArray(memories.files) ? memories.files : [];
-    const faces = (Array.isArray(behavior.faces) ? behavior.faces : [])
+    const projectedFaces = Array.isArray(modelFaces?.items)
+      ? modelFaces.items.filter((face) =>
+          typeof face?.id === "string" && face.id.trim()
+          && typeof face?.signature === "string" && face.signature.trim()
+          && face.status !== "inactive"
+        )
+      : [];
+    const faceCandidates = projectedFaces.length
+      ? projectedFaces
+      : (Array.isArray(behavior.faces) ? behavior.faces : []);
+    const faces = faceCandidates
+      .toSorted((a, b) =>
+        (Number(b?.observations) || 0) - (Number(a?.observations) || 0)
+      )
       .slice(0, 6)
       .map((face, index) => ({
         id: `face_${modelId}_${String(index + 1).padStart(2, "0")}`,
         text: cleanModelText(face.signature || face.text, 260),
         observations: Math.max(0, Math.round(Number(face.observations) || 0)),
         confidence: Math.min(1, Math.max(0, Number(face.confidence) || 0)),
-        evidenceRefs: [
-          modelEvidenceRef(
-            modelId,
-            "face",
-            face.id || face.signature || index + 1,
-          ),
-        ],
+        ...(typeof face.id === "string" && face.id.trim()
+          ? {
+              evidenceRefs: [modelEvidenceRef(modelId, "face", face.id)],
+            }
+          : {}),
       }))
       .filter((face) => face.text);
     const days = (Array.isArray(live.days) ? live.days : [])
@@ -2204,18 +2602,20 @@ async function loadLocalOwnerSnapshot(profile) {
           ? day.selfReading.letter.join("\n")
           : String(day.letter || ""),
         events: (Array.isArray(day.events) ? day.events : []).map(
-          (event, index) => ({
-            id: `${modelId}-live-${day.key}-${String(index + 1).padStart(2, "0")}`,
-            time: event.t || "—",
-            title: event.title || "Personal Model",
-            detail: event.detail || event.io || "",
-            app: String(event.io || "").split(" · ")[0] || "Personal Model",
-            evidenceRef: modelEvidenceRef(
-              modelId,
-              "event",
-              event.sourceId || `${day.key}-${index + 1}`,
-            ),
-          }),
+          (event, index) => {
+            const sourceId = String(event.sourceId || "").trim();
+            const evidenceRef = sourceId && !sourceId.startsWith("live-")
+              ? modelEvidenceRef(modelId, "event", sourceId)
+              : null;
+            return {
+              id: `${modelId}-live-${day.key}-${String(index + 1).padStart(2, "0")}`,
+              time: event.t || "—",
+              title: event.title || "Personal Model",
+              detail: event.detail || event.io || "",
+              app: String(event.io || "").split(" · ")[0] || "Personal Model",
+              ...(evidenceRef ? { evidenceRef } : {}),
+            };
+          },
         ),
       }))
       .filter((day) => day.id && day.events.length);
@@ -2227,22 +2627,47 @@ async function loadLocalOwnerSnapshot(profile) {
       "现在": "present",
       "未来": "future",
     };
+    const nowGeneratedAt = Number.isFinite(Date.parse(live.generatedAt))
+      ? new Date(live.generatedAt).toISOString()
+      : new Date().toISOString();
+    const nowRangeStart = new Date(
+      Date.parse(nowGeneratedAt) - 7 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const nowSourceRefs = [...new Set(
+      days.flatMap((day) => day.events.map((event) => event.evidenceRef)),
+    )].slice(0, 6);
     const nowItems = (Array.isArray(live.nowItems) ? live.nowItems : [])
       .filter((item) => item?.title)
       .slice(0, 6)
-      .map((item, index) => ({
-        id: String(item.id || `${modelId}-now-${index + 1}`),
-        kind: kindMap[item.kind] || "present",
-        title: String(item.title),
-        why: String(item.why || ""),
-        when: String(item.t || item.when || "现在"),
-        ...(item.day ? { dayId: String(item.day) } : {}),
-      }));
-    const updatedAt = files
+      .map((item, index) => {
+        const kind = kindMap[item.kind] || "present";
+        return {
+          id: String(item.id || `${modelId}-now-${index + 1}`),
+          kind,
+          title: String(item.title),
+          why: String(item.why || ""),
+          when: String(item.t || item.when || "现在"),
+          ...(item.day ? { dayId: String(item.day) } : {}),
+          ...(item.app ? { app: String(item.app) } : {}),
+          metadata: {
+            provenance: kind === "future" ? "generated" : "inferred",
+            ...(nowSourceRefs.length ? { sourceRefs: nowSourceRefs } : {}),
+            timeRange: { start: nowRangeStart, end: nowGeneratedAt },
+            generatedAt: nowGeneratedAt,
+            method: kind === "future"
+              ? "continuation-suggestion from Persome recent_activity / current_context"
+              : "Persome recent_activity / current_context",
+          },
+        };
+      });
+    const updatedValue = files
       .map((file) => file.updated)
       .filter((value) => Number.isFinite(Date.parse(value)))
       .sort()
-      .at(-1) || new Date().toISOString();
+      .at(-1);
+    const updatedAt = updatedValue
+      ? new Date(updatedValue).toISOString()
+      : new Date().toISOString();
     const latestDay = days[0];
     const weeklyLetter = String(latestDay?.letter || "")
       .split(/\r?\n/)
@@ -2614,8 +3039,28 @@ const server = createServer(async (req, res) => {
         await revokeModelConnector(req, res, url, connectorRevokeMatch[1]);
         return;
       }
+      const connectorDisconnectMatch = url.pathname.match(
+        /^\/api\/model\/connectors\/([A-Za-z0-9_-]+)\/disconnect$/,
+      );
+      if (req.method === "POST" && connectorDisconnectMatch) {
+        await disconnectModelConnector(
+          req,
+          res,
+          url,
+          connectorDisconnectMatch[1],
+        );
+        return;
+      }
       if (req.method === "GET" && url.pathname === "/api/model/reports") {
         await serveModelReports(req, res, url);
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/api/model/rewind/frames") {
+        await serveModelRewindFrames(req, res, url);
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/api/model/rewind/frame") {
+        await serveModelRewindFrame(req, res, url);
         return;
       }
       if (req.method === "GET" && url.pathname === "/api/model/evidence") {

@@ -2,6 +2,33 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://whoami.local/schemas/personal-model-card.schema.json",
   "title": "PersonalModelCardSnapshot",
+  "$defs": {
+    "contentMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provenance": { "enum": ["observed", "inferred", "generated"] },
+        "sourceRefs": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 3 },
+          "uniqueItems": true
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "timeRange": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["start", "end"],
+          "properties": {
+            "start": { "type": "string", "format": "date-time" },
+            "end": { "type": "string", "format": "date-time" }
+          }
+        },
+        "generatedAt": { "type": "string", "format": "date-time" },
+        "method": { "type": "string", "minLength": 1 }
+      },
+      "minProperties": 1
+    }
+  },
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -69,6 +96,7 @@
         "tagline": { "type": "string" },
         "publicUrl": { "type": "string" },
         "material": { "type": "string" },
+        "metadata": { "$ref": "#/$defs/contentMetadata" },
         "glyph": {
           "type": "array",
           "minItems": 25,
@@ -85,6 +113,7 @@
         "memoryCount": { "type": "integer", "minimum": 0 },
         "root": { "type": "string" },
         "updatedAt": { "type": "string", "format": "date-time" },
+        "metadata": { "$ref": "#/$defs/contentMetadata" },
         "faces": {
           "type": "array",
           "items": {
@@ -96,7 +125,8 @@
               "text": { "type": "string" },
               "observations": { "type": "integer", "minimum": 0 },
               "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
-              "evidenceRefs": { "type": "array", "items": { "type": "string" } }
+              "evidenceRefs": { "type": "array", "items": { "type": "string" } },
+              "metadata": { "$ref": "#/$defs/contentMetadata" }
             }
           }
         }
@@ -119,7 +149,9 @@
               "title": { "type": "string" },
               "why": { "type": "string" },
               "when": { "type": "string" },
-              "dayId": { "type": "string" }
+              "dayId": { "type": "string" },
+              "app": { "type": "string" },
+              "metadata": { "$ref": "#/$defs/contentMetadata" }
             }
           }
         }
@@ -141,6 +173,7 @@
               "title": { "type": "string" },
               "portrait": { "type": "string" },
               "letter": { "type": "string" },
+              "metadata": { "$ref": "#/$defs/contentMetadata" },
               "events": {
                 "type": "array",
                 "items": {
@@ -153,7 +186,8 @@
                     "title": { "type": "string" },
                     "detail": { "type": "string" },
                     "app": { "type": "string" },
-                    "evidenceRef": { "type": "string" }
+                    "evidenceRef": { "type": "string" },
+                    "metadata": { "$ref": "#/$defs/contentMetadata" }
                   }
                 }
               }
@@ -169,7 +203,8 @@
       "properties": {
         "description": { "type": "string" },
         "dailyLine": { "type": "string" },
-        "weeklyLetter": { "type": "array", "items": { "type": "string" } }
+        "weeklyLetter": { "type": "array", "items": { "type": "string" } },
+        "metadata": { "$ref": "#/$defs/contentMetadata" }
       }
     },
     "connectors": {
@@ -203,6 +238,7 @@
           "updatedAt": { "type": "string", "format": "date-time" },
           "readCount": { "type": "integer", "minimum": 0 },
           "evidenceCount": { "type": "integer", "minimum": 0 },
+          "metadata": { "$ref": "#/$defs/contentMetadata" },
           "sections": {
             "type": "array",
             "items": {
@@ -212,7 +248,8 @@
               "properties": {
                 "kind": { "enum": ["lead", "understanding", "evidence", "note"] },
                 "title": { "type": "string" },
-                "body": { "type": "string" }
+                "body": { "type": "string" },
+                "metadata": { "$ref": "#/$defs/contentMetadata" }
               }
             }
           },

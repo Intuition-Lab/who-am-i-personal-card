@@ -69,6 +69,14 @@ for line in sys.stdin:
                     }
                 ],
             }
+        elif tool_name == "current_context":
+            result = {
+                "current": {
+                    "summary": "The beta release gate is the current focus.",
+                    "source_type": "current_model_context",
+                },
+                "receipt": "cecilia:event:2026-08-07:01",
+            }
         else:
             result = {"unexpected_tool": tool_name}
         response = {

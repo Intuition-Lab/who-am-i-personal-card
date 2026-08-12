@@ -15,12 +15,19 @@ TAG=""
 COMMIT=""
 SOURCE_REF="HEAD"
 OUTPUT_DIRECTORY=""
+RUNTIME_CHECKOUT=""
+RELEASE_SIGNING=0
+SIGN_IDENTITY=""
+TEAM_ID=""
+NOTARY_KEYCHAIN_PROFILE=""
+SIGNING_KEYCHAIN=""
 
 usage() {
   cat <<'EOF'
 Usage: bash scripts/build-release-assets.sh options
 
-Build the exact four assets consumed by the GitHub Release workflow.
+Build the exact five self-contained assets consumed by the GitHub Release
+workflow.
 
 Required:
   --repository OWNER/REPOSITORY
@@ -29,11 +36,20 @@ Required:
   --output-directory PATH
 
 Optional:
-  --source-ref GIT_REF  Git commit/ref to archive (default: HEAD).
+  --source-ref GIT_REF  Git commit/ref to validate (default: HEAD).
+  --runtime-checkout PATH
+                        Reuse an already verified pinned Runtime checkout.
+  --release-signing     Require Developer ID signing and Apple notarization.
+  --sign-identity ID    Developer ID Application identity name.
+  --team-id TEAMID      Apple Developer Team ID.
+  --notary-profile NAME notarytool profile already stored in Keychain.
+  --signing-keychain PATH
+                        Explicit temporary signing/notary keychain.
   -h, --help            Show this help.
 
 The output directory must not already exist. The source ref must resolve to the
-declared commit and match the tracked working tree.
+declared commit and match the tracked working tree. The Personal Model source
+is embedded at build time; release installation never contacts its repository.
 EOF
 }
 
@@ -79,6 +95,50 @@ while [[ $# -gt 0 ]]; do
       OUTPUT_DIRECTORY="$2"
       shift 2
       ;;
+    --runtime-checkout)
+      [[ $# -ge 2 ]] || {
+        printf '%s\n' '--runtime-checkout requires a value.' >&2
+        exit 2
+      }
+      RUNTIME_CHECKOUT="$2"
+      shift 2
+      ;;
+    --release-signing)
+      RELEASE_SIGNING=1
+      shift
+      ;;
+    --sign-identity)
+      [[ $# -ge 2 ]] || {
+        printf '%s\n' '--sign-identity requires a value.' >&2
+        exit 2
+      }
+      SIGN_IDENTITY="$2"
+      shift 2
+      ;;
+    --team-id)
+      [[ $# -ge 2 ]] || {
+        printf '%s\n' '--team-id requires a value.' >&2
+        exit 2
+      }
+      TEAM_ID="$2"
+      shift 2
+      ;;
+    --notary-profile)
+      [[ $# -ge 2 ]] || {
+        printf '%s\n' '--notary-profile requires a value.' >&2
+        exit 2
+      }
+      NOTARY_KEYCHAIN_PROFILE="$2"
+      shift 2
+      ;;
+    --signing-keychain)
+      [[ $# -ge 2 ]] || {
+        printf '%s\n' '--signing-keychain requires a value.' >&2
+        exit 2
+      }
+      SIGNING_KEYCHAIN="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -117,6 +177,32 @@ if [[ -z "${OUTPUT_DIRECTORY}" || "${OUTPUT_DIRECTORY}" == "/" \
   printf 'Output directory must be a new, non-root path.\n' >&2
   exit 2
 fi
+if [[ "${RELEASE_SIGNING}" -eq 1 ]]; then
+  if [[ -z "${SIGN_IDENTITY}" || "${SIGN_IDENTITY}" == "-" \
+    || "${SIGN_IDENTITY}" != Developer\ ID\ Application:* \
+    || ! "${TEAM_ID}" =~ ^[A-Z0-9]{10}$ ]]; then
+    printf '%s\n' \
+      'Release assets require a Developer ID identity and valid Team ID.' >&2
+    exit 2
+  fi
+  case "${NOTARY_KEYCHAIN_PROFILE}" in
+    ""|-*|*[!A-Za-z0-9._-]*|*[[:cntrl:]]*)
+      printf '%s\n' \
+        'Release assets require a safe notary Keychain profile name.' >&2
+      exit 2
+      ;;
+  esac
+  if [[ -n "${SIGNING_KEYCHAIN}" \
+    && ( ! -f "${SIGNING_KEYCHAIN}" || -L "${SIGNING_KEYCHAIN}" ) ]]; then
+    printf '%s\n' 'The explicit signing keychain is missing or unsafe.' >&2
+    exit 2
+  fi
+elif [[ -n "${SIGN_IDENTITY}" || -n "${TEAM_ID}" \
+  || -n "${NOTARY_KEYCHAIN_PROFILE}" || -n "${SIGNING_KEYCHAIN}" ]]; then
+  printf '%s\n' \
+    'Signing inputs require the explicit --release-signing mode.' >&2
+  exit 2
+fi
 output_parent="${OUTPUT_DIRECTORY%/*}"
 if [[ "${output_parent}" == "${OUTPUT_DIRECTORY}" ]]; then
   output_parent="."
@@ -150,7 +236,6 @@ if [[ ! -f "${release_manifest}" || -L "${release_manifest}" ]]; then
   printf 'Release manifest is missing or unsafe.\n' >&2
   exit 1
 fi
-release_paths=()
 manifest_seen="|"
 manifest_line_number=0
 while IFS= read -r manifest_line || [[ -n "${manifest_line}" ]]; do
@@ -179,7 +264,7 @@ while IFS= read -r manifest_line || [[ -n "${manifest_line}" ]]; do
   manifest_seen="${manifest_seen}${release_path}|"
   if /usr/bin/git cat-file -e \
     "${source_commit}:${release_path}" 2>/dev/null; then
-    release_paths+=("${release_path}")
+    :
   elif [[ "${manifest_line}" != \?* ]]; then
     printf 'Required release manifest entry is missing: %s\n' \
       "${release_path}" >&2
@@ -223,8 +308,14 @@ if ! /usr/bin/git diff --quiet "${source_commit}" -- .; then
   exit 1
 fi
 
+# Publication assets are never built from a source tree that has not passed
+# the complete Personal Model beta gate on this macOS runner.
+bash scripts/beta-release-gate.sh
+
 repository_name="${REPOSITORY#*/}"
-bundle_name="${repository_name}-${version}.tar.gz"
+package_name="who-am-i-${version}-self-contained-macos"
+dmg_name="${package_name}.dmg"
+bundle_name="${package_name}.tar.gz"
 release_notes="docs/release-notes/${TAG}.md"
 if [[ ! -f "${release_notes}" || -L "${release_notes}" ]]; then
   printf 'Missing version-controlled release notes: %s\n' \
@@ -232,15 +323,81 @@ if [[ ! -f "${release_notes}" || -L "${release_notes}" ]]; then
   exit 1
 fi
 
+package_build_root="$(runtime_temporary_root_create 'product-release-assets')"
+cleanup() {
+  local cleanup_status=$?
+  runtime_temporary_root_remove \
+    "${package_build_root}" "product-release-assets" || true
+  return "${cleanup_status}"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+package_build_arguments=(
+  --output-directory "${package_build_root}/package"
+)
+if [[ -n "${RUNTIME_CHECKOUT}" ]]; then
+  package_build_arguments+=(--runtime-checkout "${RUNTIME_CHECKOUT}")
+fi
+if [[ "${RELEASE_SIGNING}" -eq 1 ]]; then
+  package_build_arguments+=(
+    --release-signing
+    --sign-identity "${SIGN_IDENTITY}"
+    --team-id "${TEAM_ID}"
+    --notary-profile "${NOTARY_KEYCHAIN_PROFILE}"
+  )
+  if [[ -n "${SIGNING_KEYCHAIN}" ]]; then
+    package_build_arguments+=(--signing-keychain "${SIGNING_KEYCHAIN}")
+  fi
+fi
+bash scripts/build-self-contained-package.sh \
+  "${package_build_arguments[@]}"
+for package_asset in "${dmg_name}" "${bundle_name}"; do
+  if [[ ! -f "${package_build_root}/package/${package_asset}" \
+    || -L "${package_build_root}/package/${package_asset}" ]]; then
+    printf 'Self-contained builder did not produce required asset: %s\n' \
+      "${package_asset}" >&2
+    exit 1
+  fi
+done
+
+/bin/mkdir "${package_build_root}/extracted"
+/usr/bin/tar -xzf \
+  "${package_build_root}/package/${bundle_name}" \
+  -C "${package_build_root}/extracted"
+native_app_path="${package_build_root}/extracted/${package_name}/Who Am I.app"
+embedded_product_path="${native_app_path}/Contents/Resources/product"
+if [[ ! -d "${native_app_path}" \
+  || ! -x "${native_app_path}/Contents/MacOS/WhoAmI" ]]; then
+  printf 'Self-contained package does not contain the native App entry point.\n' >&2
+  exit 1
+fi
+/usr/bin/codesign --verify --strict "${native_app_path}"
+/usr/bin/lipo "${native_app_path}/Contents/MacOS/WhoAmI" \
+  -verify_arch arm64 x86_64
+if [[ "$(/usr/bin/plutil -extract WhoAmIBootstrapInstall raw -o - \
+  "${native_app_path}/Contents/Info.plist")" != "true" ]]; then
+  printf 'Release App is not configured for first-run installation.\n' >&2
+  exit 1
+fi
+if [[ ! -x "${embedded_product_path}/Install Who Am I.command" \
+  || ! -d "${embedded_product_path}/runtime-source/.git" \
+  || ! -f "${embedded_product_path}/apps/personal-card/persome-card-server.mjs" ]]; then
+  printf 'Self-contained App does not contain its backend and Runtime.\n' >&2
+  exit 1
+fi
+(
+  cd "${embedded_product_path}"
+  /usr/bin/shasum -a 256 --check SELF-CONTAINED-SHA256SUMS >/dev/null
+)
+
 /bin/mkdir "${OUTPUT_DIRECTORY}"
-/usr/bin/git archive \
-  --format=tar \
-  --prefix="${repository_name}-${version}/" \
-  --output="${OUTPUT_DIRECTORY}/${repository_name}-${version}.tar" \
-  "${source_commit}" \
-  "${release_paths[@]}"
-/usr/bin/gzip -n -9 \
-  "${OUTPUT_DIRECTORY}/${repository_name}-${version}.tar"
+/bin/cp \
+  "${package_build_root}/package/${dmg_name}" \
+  "${package_build_root}/package/${bundle_name}" \
+  "${OUTPUT_DIRECTORY}/"
 
 runtime_lock_load runtime.lock
 {
@@ -252,8 +409,25 @@ runtime_lock_load runtime.lock
   printf 'pilot_status=%s\n' "$(/bin/cat PILOT_STATUS)"
   printf 'runtime_repository=%s\n' "${RUNTIME_REPOSITORY}"
   printf 'runtime_commit=%s\n' "${RUNTIME_COMMIT}"
+  printf 'runtime_tree=%s\n' "${RUNTIME_TREE}"
   printf 'runtime_project=%s\n' "${RUNTIME_PROJECT_NAME}"
   printf 'runtime_version=%s\n' "${RUNTIME_PROJECT_VERSION}"
+  printf 'runtime_delivery=embedded\n'
+  printf 'native_app_included=true\n'
+  printf 'native_app_entrypoint=Who Am I.app\n'
+  printf 'backend_embedded_in_app=true\n'
+  printf 'embedded_product_path=Who Am I.app/Contents/Resources/product\n'
+  if [[ "${RELEASE_SIGNING}" -eq 1 ]]; then
+    printf 'apple_signing=developer-id\n'
+    printf 'apple_team_id=%s\n' "${TEAM_ID}"
+    printf 'apple_dmg_notarized=true\n'
+  else
+    printf 'apple_signing=ad-hoc\n'
+    printf 'apple_team_id=none\n'
+    printf 'apple_dmg_notarized=false\n'
+  fi
+  printf 'dmg_asset=%s\n' "${dmg_name}"
+  printf 'tar_asset=%s\n' "${bundle_name}"
 } > "${OUTPUT_DIRECTORY}/RELEASE-METADATA.txt"
 /bin/cp "${release_notes}" "${OUTPUT_DIRECTORY}/RELEASE-NOTES.md"
 
@@ -261,14 +435,20 @@ cat >> "${OUTPUT_DIRECTORY}/RELEASE-NOTES.md" <<EOF
 
 ## Exact release assets
 
-This release contains exactly these four assets:
+This release contains exactly these five assets:
 
+- \`${dmg_name}\`
 - \`${bundle_name}\`
 - \`RELEASE-METADATA.txt\`
 - \`RELEASE-NOTES.md\`
 - \`SHA256SUMS\`
 
 ### Install from a public repository
+
+For the normal macOS flow, verify \`${dmg_name}\` against \`SHA256SUMS\`, open
+the DMG, and double-click \`Who Am I.app\`. Its native first-run window opens
+the verified installer and then launches the installed App. The equivalent
+command-line flow is:
 
 \`\`\`bash
 (
@@ -277,6 +457,10 @@ This release contains exactly these four assets:
     mktemp -d "\${TMPDIR:-/tmp}/${repository_name}-${version}-download.XXXXXX"
   )"
   cd "\${download_directory}"
+  curl --proto '=https' --tlsv1.2 --fail \
+    --retry 3 --retry-delay 2 --retry-all-errors \
+    --location --remote-name \
+    "https://github.com/${REPOSITORY}/releases/download/${TAG}/${dmg_name}"
   curl --proto '=https' --tlsv1.2 --fail \
     --retry 3 --retry-delay 2 --retry-all-errors \
     --location --remote-name \
@@ -293,11 +477,11 @@ This release contains exactly these four assets:
     --retry 3 --retry-delay 2 --retry-all-errors \
     --location --remote-name \
     "https://github.com/${REPOSITORY}/releases/download/${TAG}/SHA256SUMS"
-  test "\$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 4
+  test "\$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 5
   shasum -a 256 --check SHA256SUMS
   tar -xzf "${bundle_name}"
-  cd "${repository_name}-${version}"
-  bash install.sh --interactive
+  cd "${package_name}"
+  bash "Who Am I.app/Contents/Resources/product/Install Who Am I.command"
 )
 \`\`\`
 
@@ -315,12 +499,15 @@ Install and authenticate the GitHub CLI first, then run:
   cd "\${download_directory}"
   gh release download "${TAG}" \
     --repo "${REPOSITORY}" \
+    --pattern "${dmg_name}" \
     --pattern "${bundle_name}" \
     --pattern "RELEASE-METADATA.txt" \
     --pattern "RELEASE-NOTES.md" \
     --pattern "SHA256SUMS"
-  test "\$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 4
+  test "\$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 5
   gh release verify "${TAG}" \
+    --repo "${REPOSITORY}"
+  gh release verify-asset "${TAG}" "${dmg_name}" \
     --repo "${REPOSITORY}"
   gh release verify-asset "${TAG}" "${bundle_name}" \
     --repo "${REPOSITORY}"
@@ -332,8 +519,8 @@ Install and authenticate the GitHub CLI first, then run:
     --repo "${REPOSITORY}"
   shasum -a 256 --check SHA256SUMS
   tar -xzf "${bundle_name}"
-  cd "${repository_name}-${version}"
-  bash install.sh --interactive
+  cd "${package_name}"
+  bash "Who Am I.app/Contents/Resources/product/Install Who Am I.command"
 )
 \`\`\`
 EOF
@@ -349,7 +536,7 @@ for required_recipe_marker in \
   'find . -maxdepth 1 -type f | wc -l' \
   '--retry 3 --retry-delay 2 --retry-all-errors' \
   'shasum -a 256 --check SHA256SUMS' \
-  'bash install.sh --interactive'; do
+  'bash "Who Am I.app/Contents/Resources/product/Install Who Am I.command"'; do
   if ! /usr/bin/grep -Fq -- \
     "${required_recipe_marker}" "${OUTPUT_DIRECTORY}/RELEASE-NOTES.md"; then
     printf 'Generated install recipe is missing a fail-closed marker: %s\n' \
@@ -361,13 +548,14 @@ done
 (
   cd "${OUTPUT_DIRECTORY}"
   LC_ALL=C /usr/bin/shasum -a 256 \
+    "${dmg_name}" \
     "${bundle_name}" \
     RELEASE-METADATA.txt \
     RELEASE-NOTES.md \
     > SHA256SUMS
   /usr/bin/shasum -a 256 --check SHA256SUMS
-  [[ "$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 4 ]]
+  [[ "$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 5 ]]
 )
 
-printf 'Built four verified release assets in %s.\n' \
+printf 'Built five verified self-contained release assets in %s.\n' \
   "${OUTPUT_DIRECTORY}"

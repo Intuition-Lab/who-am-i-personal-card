@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 
 import { ConnectorIsolationError } from "./connector-session-service.mjs";
+import {
+  connectorDisplayName,
+  contextTypeForEvent,
+  isContextReadEvent,
+  recordedOutcomeForEvent,
+} from "./connector-event-semantics.mjs";
 
 function freezeReport(report) {
   for (const section of report.sections) {
@@ -24,6 +30,20 @@ function reportIdFor(session, events) {
     )
     .digest("hex")
     .slice(0, 24)}`;
+}
+
+function formatActions(events) {
+  return events
+    .map((event) => {
+      const action = event.summary ?? event.tool ?? event.eventType;
+      const outcome = event.status === "error" ? "（失败）" : "";
+      return `${event.occurredAt} · ${action}${outcome}`;
+    })
+    .join("\n");
+}
+
+function unique(values) {
+  return [...new Set(values.filter((value) => value))];
 }
 
 export class ReportService {
@@ -87,29 +107,57 @@ export class ReportService {
       return Object.freeze([]);
     }
 
-    const evidenceRefs = [
-      ...new Set(
-        reportableEvents.map(({ receipt }) => receipt).filter((receipt) => receipt),
-      ),
-    ];
-    const updatedAt = reportableEvents.reduce(
+    const orderedEvents = [...reportableEvents].sort((left, right) =>
+      left.occurredAt.localeCompare(right.occurredAt)
+    );
+    const evidenceRefs = unique(orderedEvents.map(({ receipt }) => receipt));
+    const readEvents = orderedEvents.filter(isContextReadEvent);
+    const contextTypes = unique(readEvents.map(contextTypeForEvent));
+    const outcomes = unique(orderedEvents.flatMap(recordedOutcomeForEvent));
+    const updatedAt = orderedEvents.reduce(
       (latest, event) =>
         event.occurredAt > latest ? event.occurredAt : latest,
-      reportableEvents[0].occurredAt,
+      orderedEvents[0].occurredAt,
     );
-    const sections = reportableEvents.map((event) => ({
-      kind: event.receipt ? "evidence" : "note",
-      title: event.tool ?? event.eventType,
-      body: event.summary ?? "Connector activity recorded.",
-    }));
+    const connectorName = connectorDisplayName(session.connectorId);
+    const sections = [
+      {
+        kind: "lead",
+        title: "Agent 做了什么",
+        body: formatActions(orderedEvents),
+      },
+      {
+        kind: contextTypes.length > 0 ? "understanding" : "note",
+        title: "读取的上下文",
+        body: contextTypes.length > 0
+          ? `${connectorName} 实际读取了：${contextTypes.join("、")}。`
+          : "这次会话没有记录到 Personal Model 上下文读取。",
+      },
+      {
+        kind: outcomes.length > 0 ? "understanding" : "note",
+        title: "结果摘要",
+        body: outcomes.length > 0
+          ? outcomes.join("；")
+          : "Connector 没有记录可展示的结果摘要。",
+      },
+      {
+        kind: evidenceRefs.length > 0 ? "evidence" : "note",
+        title: "证据和时间",
+        body: evidenceRefs.length > 0
+          ? `${evidenceRefs.length} 条 Evidence；首次记录 ${orderedEvents[0].occurredAt}，最近记录 ${updatedAt}。`
+          : `没有 Evidence 回执；首次记录 ${orderedEvents[0].occurredAt}，最近记录 ${updatedAt}。`,
+      },
+    ];
     const report = freezeReport({
-      id: reportIdFor(session, reportableEvents),
+      id: reportIdFor(session, events),
       modelId: session.modelId,
       connectorId: session.connectorId,
-      title: `${session.connectorId} · Context`,
-      summary: `${reportableEvents.length} connector event${reportableEvents.length === 1 ? "" : "s"} recorded for this model session.`,
+      title: `${connectorName} · Personal Model 使用报告`,
+      summary: contextTypes.length > 0
+        ? `${connectorName} 记录了 ${orderedEvents.length} 个实际动作，其中 ${readEvents.length} 次读取 ${contextTypes.join("、")}。`
+        : `${connectorName} 记录了 ${orderedEvents.length} 个实际动作，没有记录到上下文读取。`,
       updatedAt,
-      readCount: reportableEvents.length,
+      readCount: readEvents.length,
       evidenceCount: evidenceRefs.length,
       sections,
       evidenceRefs,

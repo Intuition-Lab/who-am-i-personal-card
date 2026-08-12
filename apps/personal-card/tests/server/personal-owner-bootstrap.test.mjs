@@ -126,6 +126,80 @@ test("production creates and restores the downloader's own Personal Model identi
     /Cecilia|@cecilia|lin-demo|@lin/,
   );
 
+  const previousConclusion =
+    "MIRA_ONLY_FACE_6C21 returns to the field before making a decision.";
+  const replacement =
+    "MIRA_ONLY_FACE_6C21 now verifies authorization before making a decision.";
+  assert.equal(
+    bootstrap.body.snapshot.personalModel.faces[0].text,
+    previousConclusion,
+  );
+  const eventReference =
+    bootstrap.body.snapshot.time.days[0].events[0].evidenceRef;
+  const eventEvidence = await request(
+    `/api/model/evidence/${encodeURIComponent(eventReference)}`,
+  );
+  assert.equal(eventEvidence.status, 200);
+  assert.equal(eventEvidence.body.evidence.modelId, stableModelId);
+  assert.equal(
+    eventEvidence.body.evidence.source.type,
+    "persome-activity",
+  );
+  assert.equal(eventEvidence.body.evidence.source.application, "Notes");
+  assert.equal(
+    eventEvidence.body.evidence.source.originalTime,
+    new Date("2026-08-07T09:00").toISOString(),
+  );
+  assert.equal(
+    eventEvidence.body.evidence.supports[0].relationship,
+    "direct",
+  );
+  assert.equal(eventEvidence.body.evidence.availability.status, "available");
+
+  const faceReference =
+    bootstrap.body.snapshot.personalModel.faces[0].evidenceRefs[0];
+  const faceEvidence = await request(
+    `/api/model/evidence/${encodeURIComponent(faceReference)}`,
+  );
+  assert.equal(faceEvidence.status, 200);
+  assert.equal(faceEvidence.body.evidence.source.type, "derived-summary");
+  assert.equal(faceEvidence.body.evidence.availability.status, "available");
+  assert.equal(faceEvidence.body.evidence.supports[0].relationship, "indirect");
+  assert.equal(
+    faceEvidence.body.evidence.content.lineage[0].reference.startsWith(
+      `${stableModelId}:`,
+    ),
+    true,
+  );
+  const corrected = await request("/api/model/correct", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ correction: "The old conclusion is inaccurate." }),
+  });
+  assert.equal(corrected.status, 200);
+  assert.equal(corrected.body.ok, true);
+  assert.equal(corrected.body.status, "applied");
+  assert.match(
+    corrected.body.receipt,
+    new RegExp(`^${stableModelId}:correction:[a-f0-9]{64}$`),
+  );
+  assert.equal(corrected.body.receiptSource, "product");
+  assert.equal(corrected.body.affected[0].state, "deprioritized");
+  assert.equal(corrected.body.verification.status, "verified");
+  assert.equal(corrected.body.verification.refreshed, true);
+  assert.equal(
+    corrected.body.verification.oldConclusionDeprioritized,
+    true,
+  );
+  assert.equal(corrected.body.revision, bootstrap.body.revision + 1);
+
+  const propagated = await request("/api/model/bootstrap");
+  assert.equal(
+    propagated.body.snapshot.personalModel.faces[0].text,
+    replacement,
+  );
+  assert.equal(JSON.stringify(propagated.body).includes(previousConclusion), false);
+
   const productionModels = await request("/api/models");
   assert.deepEqual(
     productionModels.body.models.map((model) => model.id),
@@ -147,4 +221,8 @@ test("production creates and restores the downloader's own Personal Model identi
   assert.equal(restarted.status, 200);
   assert.equal(restarted.body.modelId, stableModelId);
   assert.equal(restarted.body.snapshot.model.handle, "@mira");
+  assert.equal(
+    restarted.body.snapshot.personalModel.faces[0].text,
+    replacement,
+  );
 });

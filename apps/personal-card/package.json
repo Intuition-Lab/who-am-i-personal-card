@@ -1,6 +1,6 @@
 {
   "name": "persome-desktop",
-  "version": "0.1.0-beta.4",
+  "version": "0.1.0-beta.5",
   "description": "A private, self-growing Personal Model for every AI on your Mac.",
   "author": "Intuition Lab",
   "private": true,
@@ -38,7 +38,8 @@
     "./personal-model-card.schema.json": "./src/contracts/personal-model-card.schema.json",
     "./public-personal-model-card.schema.json": "./src/contracts/public-personal-model-card.schema.json",
     "./personal-model-grant.schema.json": "./src/contracts/personal-model-grant.schema.json",
-    "./personal-model-evidence.schema.json": "./src/contracts/personal-model-evidence.schema.json"
+    "./personal-model-evidence.schema.json": "./src/contracts/personal-model-evidence.schema.json",
+    "./personal-model-correction.schema.json": "./src/contracts/personal-model-correction.schema.json"
   },
   "dependencies": {
     "@base-ui/react": "1.6.0",
