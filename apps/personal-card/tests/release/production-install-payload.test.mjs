@@ -82,8 +82,14 @@ test("the currently installed Personal Card payload contains no demo identity or
     }
     if (!textExtensions.has(path.extname(absolute))) continue;
     const content = await readFile(absolute, "utf8");
+    // Integrity digests are opaque base64 and can coincidentally contain a
+    // short owner token. They are still lockfile-verified, but are not product
+    // identity or UI content.
+    const inspectedContent = relative === "package-lock.json"
+      ? content.replace(/^\s*"integrity"\s*:\s*"[^"]+",?\s*$/gm, "")
+      : content;
     for (const token of forbidden) {
-      if (content.includes(token)) findings.push(`${relative}: ${JSON.stringify(token)}`);
+      if (inspectedContent.includes(token)) findings.push(`${relative}: ${JSON.stringify(token)}`);
     }
   }
 

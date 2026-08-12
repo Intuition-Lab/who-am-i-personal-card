@@ -13,6 +13,7 @@ export const PERSONAL_MODEL_SCOPES = Object.freeze([
   "reports:read",
   "model:search",
   "model:ask",
+  "model:jot",
   "model:correct",
   "connectors:read",
   "connectors:connect",

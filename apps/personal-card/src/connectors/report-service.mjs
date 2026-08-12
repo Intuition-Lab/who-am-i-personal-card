@@ -75,29 +75,41 @@ export class ReportService {
       );
     }
 
+    // A successful connection is a grant receipt, not evidence that the agent
+    // actually used or understood the Personal Model. Reports begin only with
+    // observable post-connection tool activity.
+    const reportableEvents = events.filter(
+      (event) =>
+        event.eventType !== "connector/connected"
+        && event.tool !== "connectAgent",
+    );
+    if (reportableEvents.length === 0) {
+      return Object.freeze([]);
+    }
+
     const evidenceRefs = [
       ...new Set(
-        events.map(({ receipt }) => receipt).filter((receipt) => receipt),
+        reportableEvents.map(({ receipt }) => receipt).filter((receipt) => receipt),
       ),
     ];
-    const updatedAt = events.reduce(
+    const updatedAt = reportableEvents.reduce(
       (latest, event) =>
         event.occurredAt > latest ? event.occurredAt : latest,
-      events[0].occurredAt,
+      reportableEvents[0].occurredAt,
     );
-    const sections = events.map((event) => ({
+    const sections = reportableEvents.map((event) => ({
       kind: event.receipt ? "evidence" : "note",
       title: event.tool ?? event.eventType,
       body: event.summary ?? "Connector activity recorded.",
     }));
     const report = freezeReport({
-      id: reportIdFor(session, events),
+      id: reportIdFor(session, reportableEvents),
       modelId: session.modelId,
       connectorId: session.connectorId,
       title: `${session.connectorId} · Context`,
-      summary: `${events.length} connector event${events.length === 1 ? "" : "s"} recorded for this model session.`,
+      summary: `${reportableEvents.length} connector event${reportableEvents.length === 1 ? "" : "s"} recorded for this model session.`,
       updatedAt,
-      readCount: events.length,
+      readCount: reportableEvents.length,
       evidenceCount: evidenceRefs.length,
       sections,
       evidenceRefs,

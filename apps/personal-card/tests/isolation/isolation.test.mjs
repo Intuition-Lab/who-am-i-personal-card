@@ -311,6 +311,36 @@ test("ReportService aggregates only one model, connector, session, and Grant", a
   });
 });
 
+test("ReportService does not turn a connection receipt into an Agent Report", async () => {
+  await withTempRuntime(async (runtimeRoot) => {
+    const sessions = createSessionService(["cs_cecilia_session_0001"]);
+    const cecilia = createConnectorSession(sessions);
+    const store = new ConnectorEventStore({
+      runtimeRoot,
+      clock: () => new Date(NOW),
+      sessionService: sessions,
+    });
+    await store.appendEvent(cecilia, {
+      eventType: "connector/connected",
+      tool: "connectAgent",
+      summary: "codex connected to cecilia",
+    });
+    const reports = new ReportService({
+      sessionService: sessions,
+      eventStore: store,
+    });
+    assert.deepEqual(
+      await reports.listReports({
+        sessionId: cecilia.sessionId,
+        viewerSessionId: cecilia.viewerSessionId,
+        modelId: "cecilia",
+        connectorId: "codex",
+      }),
+      [],
+    );
+  });
+});
+
 test("damaged JSONL tail is ignored without falling back to another model", async () => {
   await withTempRuntime(async (runtimeRoot) => {
     const sessions = createSessionService(["cs_cecilia_session_0001"]);

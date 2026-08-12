@@ -94,6 +94,10 @@ const toolResults = {
   correct_memory: {
     ok: true,
   },
+  remember: {
+    ok: true,
+    memory_id: "fake-jot-memory",
+  },
 };
 
 const lines = createInterface({ input: process.stdin });

@@ -1,16 +1,30 @@
 {
-  "name": "personal-card-v5-persome-live",
-  "version": "0.1.0",
+  "name": "persome-desktop",
+  "version": "0.1.0-beta.4",
+  "description": "A private, self-growing Personal Model for every AI on your Mac.",
+  "author": "Intuition Lab",
   "private": true,
   "type": "module",
+  "main": "electron/main.mjs",
   "engines": {
     "node": ">=20.10"
   },
   "scripts": {
-    "build": "node scripts/sync-live-bundle.mjs",
+    "build": "npm run build:legacy && npm run build:renderer",
+    "build:legacy": "node scripts/sync-live-bundle.mjs",
+    "build:renderer": "vite build",
+    "dev": "vite --host 127.0.0.1",
+    "dev:electron": "WHOAMI_ELECTRON_RENDERER_URL=http://127.0.0.1:5173 electron electron/main.mjs",
+    "desktop": "npm run build:renderer && electron electron/main.mjs",
+    "pack:electron": "npm run build:renderer && electron-builder --dir",
+    "dist:electron": "npm run build:renderer && electron-builder --mac dmg zip",
+    "dist:electron:universal": "npm run build:renderer && electron-builder --mac dmg zip --universal",
+    "typecheck": "tsc --noEmit",
     "start": "node persome-card-server.mjs",
     "test": "node --test",
     "test:browser": "npm run build && node tests/browser/runtime-switch.mjs",
+    "test:electron-renderer": "npm run build:renderer && node tests/browser/electron-renderer.mjs",
+    "test:electron-shell": "npm run build:renderer && node tests/browser/electron-shell.mjs",
     "test:production-browser": "npm run build && node tests/browser/production-owner.mjs",
     "test:production-no-demo": "node tests/browser/production-fresh-home-no-demo.mjs && node --test tests/release/production-install-payload.test.mjs",
     "test:contract": "node --test tests/contract",
@@ -27,10 +41,101 @@
     "./personal-model-evidence.schema.json": "./src/contracts/personal-model-evidence.schema.json"
   },
   "dependencies": {
+    "@base-ui/react": "1.6.0",
     "ajv": "8.20.0",
-    "ajv-formats": "3.0.1"
+    "ajv-formats": "3.0.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "playwright-core": "^1.62.1"
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "24.12.0",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "4.7.0",
+    "electron": "39.8.10",
+    "electron-builder": "26.15.3",
+    "playwright-core": "^1.62.1",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "vite": "6.4.3"
+  },
+  "build": {
+    "appId": "ai.intuition.persome",
+    "productName": "Persome",
+    "afterPack": "electron/after-pack.mjs",
+    "asar": true,
+    "files": [
+      "dist/renderer/**/*",
+      "electron/**/*",
+      "assets/**/*",
+      "src/auth/**/*",
+      "src/client/**/*",
+      "src/connectors/**/*",
+      "src/contracts/**/*",
+      "src/evidence/**/*",
+      "src/providers/local-persome-provider.mjs",
+      "src/providers/provider-registry.mjs",
+      "src/providers/remote-personal-model-provider.mjs",
+      "src/providers/snapshot-backed-provider.mjs",
+      "src/setup/**/*",
+      "node_modules/**/*",
+      "package.json",
+      "persome-card-server.mjs",
+      "whoami-mcp-proxy.mjs",
+      "设置我的 Personal Model.command"
+    ],
+    "asarUnpack": [
+      "dist/renderer/**/*",
+      "persome-card-server.mjs",
+      "whoami-mcp-proxy.mjs",
+      "设置我的 Personal Model.command",
+      "src/auth/**/*",
+      "src/connectors/**/*",
+      "src/contracts/**/*",
+      "src/evidence/**/*",
+      "src/providers/local-persome-provider.mjs",
+      "src/providers/provider-registry.mjs",
+      "src/providers/remote-personal-model-provider.mjs",
+      "src/providers/snapshot-backed-provider.mjs",
+      "src/setup/**/*",
+      "node_modules/ajv/**/*",
+      "node_modules/ajv-formats/**/*",
+      "node_modules/fast-deep-equal/**/*",
+      "node_modules/fast-uri/**/*",
+      "node_modules/json-schema-traverse/**/*",
+      "node_modules/require-from-string/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../../",
+        "to": "product-installer",
+        "filter": [
+          "VERSION",
+          "runtime.lock",
+          "product.lock",
+          "install.sh",
+          "uninstall-runtime.sh",
+          "scripts/diagnose.sh",
+          "scripts/verify.sh",
+          "scripts/verify-product.sh",
+          "scripts/lib/runtime-lock.sh",
+          "scripts/lib/product-lock.sh"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/Persome.icns",
+      "minimumSystemVersion": "13.0",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Persome uses the microphone only for on-device transcription after you press the microphone button.",
+        "NSSpeechRecognitionUsageDescription": "Persome transcribes your voice on this Mac so you can jot or recall without typing."
+      },
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    }
   }
 }

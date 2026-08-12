@@ -9,6 +9,7 @@ PERSOME_BIN="$PERSOME_HOME/venv/bin/persome"
 find_product_installer() {
   local candidate
   for candidate in \
+    "$CARD_DIR/../product-installer/install.sh" \
     "$CARD_DIR/../../install.sh" \
     "$CARD_DIR/../install.sh" \
     "$CARD_DIR/install.sh"; do
@@ -39,7 +40,7 @@ if [[ ! -x "$PERSOME_BIN" ]]; then
   echo "接下来会安装固定版本的 Personal Model Runtime。"
   echo "数据只保存在这台 Mac；macOS 权限需要由你亲自确认。"
   echo
-  /bin/bash "$PRODUCT_INSTALLER" --interactive || {
+  /bin/bash "$PRODUCT_INSTALLER" --interactive --runtime-only || {
     echo
     echo "安装尚未完成。你可以稍后重新运行这个向导。"
     read "?按回车关闭…"
@@ -65,5 +66,5 @@ PERSOME_ROOT="$PERSOME_HOME" "$PERSOME_BIN" onboard --tier tiny || {
 PERSOME_ROOT="$PERSOME_HOME" "$PERSOME_BIN" model open --onboarding || true
 
 echo
-echo "Personal Model 已准备好。请回到 Who Am I，点击“重新检测”。"
+echo "Personal Model 已准备好。请回到 Persome，应用会自动重新检测。"
 read "?按回车关闭…"

@@ -230,6 +230,14 @@ export class SnapshotBackedPersonalModelProvider extends PersonalModelProvider {
     );
   }
 
+  async jot() {
+    throw new PersonalModelProviderError(
+      "PROVIDER_READ_ONLY",
+      "This Personal Model Provider is read-only.",
+      { status: 405 },
+    );
+  }
+
   async connectAgent(modelId, connectorId, grant, options) {
     assertSafeModelId(modelId);
     if (typeof connectorId !== "string" || connectorId.length === 0) {
