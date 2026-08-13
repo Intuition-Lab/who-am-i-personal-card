@@ -1,0 +1,1263 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Persome · Interaction Architecture Preview</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #e9e8e3;
+      --grid: rgba(40, 42, 40, .052);
+      --ink: #1f211f;
+      --muted: #71736f;
+      --faint: #9da09b;
+      --paper: #f8f7f3;
+      --paper-2: #efeee9;
+      --line: rgba(31, 33, 31, .14);
+      --line-strong: rgba(31, 33, 31, .24);
+      --blue: #3268d4;
+      --blue-soft: rgba(50, 104, 212, .11);
+      --green: #2e8b62;
+      --green-soft: rgba(46, 139, 98, .11);
+      --orange: #d96b42;
+      --orange-soft: rgba(217, 107, 66, .11);
+      --night: #0d0e13;
+      --night-2: #151721;
+      --star: #c5ccff;
+      --ease: cubic-bezier(.22, .78, .24, 1);
+      --shadow: 0 18px 48px rgba(41, 42, 39, .13), 0 2px 8px rgba(41, 42, 39, .08);
+      --mono: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      --sans: "Avenir Next", "SF Pro Display", "PingFang SC", "Hiragino Sans GB", sans-serif;
+      --serif: "Iowan Old Style", Georgia, "Songti SC", serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; }
+    body { overflow: hidden; color: var(--ink); background: var(--canvas); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+    button { color: inherit; font: inherit; }
+    button:focus-visible { outline: 3px solid rgba(50, 104, 212, .28); outline-offset: 3px; }
+    [hidden] { display: none !important; }
+
+    .topbar {
+      position: fixed;
+      z-index: 100;
+      inset: 0 0 auto;
+      display: grid;
+      height: 58px;
+      grid-template-columns: minmax(310px, 1fr) auto minmax(310px, 1fr);
+      align-items: center;
+      padding: 0 16px 0 20px;
+      border-bottom: 1px solid rgba(31, 33, 31, .13);
+      background: rgba(248, 247, 243, .88);
+      box-shadow: 0 1px 10px rgba(31, 33, 31, .06);
+      backdrop-filter: blur(24px) saturate(130%);
+      -webkit-backdrop-filter: blur(24px) saturate(130%);
+    }
+    .brand, .toolbar, .flow-key { display: flex; align-items: center; }
+    .brand { gap: 11px; min-width: 0; }
+    .brand-mark { display: grid; width: 28px; height: 28px; grid-template-columns: repeat(3, 4px); place-content: center; gap: 3px; border: 1px solid var(--line-strong); border-radius: 9px; background: white; box-shadow: 0 2px 7px rgba(31, 33, 31, .07); }
+    .brand-mark i { width: 4px; height: 4px; border-radius: 50%; background: var(--ink); }
+    .brand-copy { display: grid; min-width: 0; line-height: 1.1; }
+    .brand-copy strong { font-size: 12px; letter-spacing: .025em; }
+    .brand-copy span { margin-top: 3px; overflow: hidden; color: var(--muted); font: 9px var(--mono); letter-spacing: .08em; text-overflow: ellipsis; white-space: nowrap; }
+    .flow-key { gap: 6px; padding: 5px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.62); }
+    .flow-key span { padding: 5px 9px; border-radius: 7px; color: var(--muted); font-size: 10px; font-weight: 650; }
+    .flow-key span.active { background: var(--blue); color: white; box-shadow: 0 4px 12px rgba(50,104,212,.24); }
+    .flow-key i { width: 14px; height: 1px; background: var(--line-strong); }
+    .toolbar { justify-content: flex-end; gap: 8px; }
+    .tool-button, .play-button {
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: rgba(255,255,255,.7);
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 680;
+    }
+    .tool-button { min-width: 34px; padding: 0 10px; }
+    .tool-button:hover { background: white; border-color: var(--line-strong); }
+    .zoom-readout { min-width: 48px; color: var(--muted); font-family: var(--mono); }
+    .play-button { display: flex; align-items: center; gap: 8px; padding: 0 14px; border-color: #202320; background: #202320; color: white; box-shadow: 0 6px 16px rgba(31,33,31,.16); }
+    .play-button:hover { background: var(--blue); border-color: var(--blue); transform: translateY(-1px); }
+    .play-button i { width: 0; height: 0; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 7px solid currentColor; }
+
+    .viewport { position: absolute; inset: 58px 0 0; overflow: auto; overscroll-behavior: none; }
+    .canvas {
+      position: relative;
+      width: max-content;
+      min-width: 100%;
+      min-height: 100%;
+      padding: 74px 88px 130px;
+      background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+      background-size: 20px 20px;
+      transform-origin: 0 0;
+    }
+    .canvas::before { position: absolute; inset: 0; content: ""; pointer-events: none; background: radial-gradient(circle at 24% 15%, rgba(255,255,255,.72), transparent 28%), radial-gradient(circle at 83% 63%, rgba(50,104,212,.045), transparent 31%); }
+    .board { position: relative; z-index: 1; width: 3430px; }
+
+    .board-intro { display: grid; width: 1080px; grid-template-columns: minmax(0, 1fr) 330px; gap: 56px; align-items: end; margin-bottom: 56px; }
+    .eyebrow { display: flex; align-items: center; gap: 9px; margin-bottom: 13px; color: var(--blue); font: 10px var(--mono); font-weight: 700; letter-spacing: .15em; text-transform: uppercase; }
+    .eyebrow::before { width: 26px; height: 2px; background: currentColor; content: ""; }
+    .board-intro h1 { max-width: 760px; margin: 0; font-family: var(--serif); font-size: 48px; font-weight: 400; letter-spacing: -.042em; line-height: 1.04; }
+    .board-intro h1 em { color: var(--blue); font-weight: 400; }
+    .board-intro p { margin: 18px 0 0; color: #5e615d; font-size: 14px; line-height: 1.8; }
+    .verdict { padding: 17px 18px 16px; border: 1px solid rgba(46,139,98,.24); border-radius: 13px; background: rgba(248,247,243,.76); box-shadow: 0 12px 32px rgba(41,42,39,.08); }
+    .verdict strong { display: flex; align-items: center; gap: 7px; font-size: 11px; }
+    .verdict strong::before { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px var(--green-soft); content: ""; }
+    .verdict p { margin: 9px 0 0; color: var(--muted); font-size: 11px; line-height: 1.65; }
+
+    .lane-heading { display: flex; width: 100%; align-items: center; gap: 12px; margin: 0 0 14px; }
+    .lane-heading span { padding: 5px 8px; border-radius: 6px; background: var(--ink); color: white; font: 9px var(--mono); letter-spacing: .11em; }
+    .lane-heading h2 { margin: 0; font-size: 13px; font-weight: 720; letter-spacing: -.01em; }
+    .lane-heading small { color: var(--muted); font-size: 10px; }
+    .lane-heading::after { flex: 1; height: 1px; background: var(--line); content: ""; }
+    .core-lane { display: flex; align-items: flex-start; }
+
+    .frame-wrap { width: 500px; flex: none; }
+    .frame-meta { display: flex; min-height: 54px; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 0 2px 11px; }
+    .frame-meta div { display: grid; gap: 4px; }
+    .frame-meta strong { font-size: 12px; letter-spacing: -.01em; }
+    .frame-meta small { color: var(--muted); font: 9px var(--mono); letter-spacing: .04em; }
+    .frame-chip { padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; background: rgba(248,247,243,.72); color: var(--muted); font: 8px var(--mono); letter-spacing: .08em; white-space: nowrap; }
+    .frame-chip.state { border-color: rgba(50,104,212,.24); background: var(--blue-soft); color: var(--blue); }
+    .frame-chip.page { border-color: rgba(46,139,98,.26); background: var(--green-soft); color: var(--green); }
+    .frame {
+      position: relative;
+      width: 500px;
+      height: 354px;
+      overflow: hidden;
+      border: 1px solid rgba(31,33,31,.2);
+      border-radius: 5px;
+      background: #d2d0c8;
+      box-shadow: var(--shadow);
+      transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms var(--ease);
+    }
+    .frame::after { position: absolute; z-index: 30; inset: 0; border: 2px solid transparent; content: ""; pointer-events: none; }
+    .frame:hover { border-color: var(--blue); box-shadow: 0 22px 58px rgba(41,42,39,.16), 0 0 0 3px rgba(50,104,212,.08); transform: translateY(-2px); }
+    .frame.selected::after { border-color: var(--blue); }
+    .frame-note { display: grid; grid-template-columns: 18px 1fr; gap: 8px; margin: 11px 2px 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+    .frame-note b { display: grid; width: 18px; height: 18px; place-items: center; border-radius: 50%; background: var(--blue); color: white; font: 8px var(--mono); }
+
+    .opening-screen { position: absolute; inset: 0; display: grid; place-items: center; background: #f1efe9; }
+    .opening-title { position: absolute; top: 30px; left: 50%; color: #a7a39b; font: 7px var(--mono); letter-spacing: .45em; transform: translateX(-50%); }
+    .dossier { position: relative; width: 108px; height: 145px; border: 1px solid rgba(255,255,255,.14); border-radius: 7px; background: linear-gradient(150deg,#383941,#191a20 62%,#111217); box-shadow: 0 24px 40px -16px rgba(23,23,25,.55), inset 0 1px rgba(255,255,255,.13); color: white; transform: rotateX(5deg) rotateY(-10deg); }
+    .dossier::after { position: absolute; top: 14px; left: 13px; color: rgba(255,255,255,.74); content: "✳"; font-size: 10px; }
+    .dossier-meta { position: absolute; right: 10px; bottom: 10px; left: 10px; display: flex; justify-content: space-between; color: rgba(255,255,255,.56); font: 4.5px var(--mono); letter-spacing: .18em; }
+    .opening-hint { position: absolute; top: calc(50% + 98px); left: 50%; color: #aba79f; font-size: 6px; letter-spacing: .04em; transform: translateX(-50%); }
+    .actual-hotspot { position: absolute; z-index: 8; border: 1.5px solid var(--orange); border-radius: 5px; background: rgba(217,107,66,.06); }
+    .actual-hotspot::before { position: absolute; top: -17px; left: -1px; padding: 3px 5px; border-radius: 4px; background: var(--orange); color: white; content: attr(data-label); font: 5px var(--mono); letter-spacing: .07em; white-space: nowrap; }
+    .actual-hotspot.cruise { top: 189px; left: 329px; width: 38px; height: 19px; }
+    .flow-fact { display: flex; align-items: center; gap: 7px; margin-top: 9px; padding: 7px 9px; border: 1px solid rgba(46,139,98,.22); border-radius: 7px; background: var(--green-soft); color: #416653; font-size: 8px; line-height: 1.45; }
+    .flow-fact i { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--green); }
+
+    .connector { display: grid; width: 126px; flex: none; place-items: center; padding-top: 213px; }
+    .connector small { margin-bottom: 9px; color: var(--muted); font: 8px var(--mono); text-align: center; }
+    .arrow { position: relative; width: 92px; height: 1px; background: rgba(31,33,31,.34); }
+    .arrow::after { position: absolute; top: -4px; right: -1px; width: 8px; height: 8px; border-top: 1px solid rgba(31,33,31,.55); border-right: 1px solid rgba(31,33,31,.55); content: ""; transform: rotate(45deg); }
+    .connector.primary .arrow { height: 2px; background: var(--blue); }
+    .connector.primary .arrow::after { border-color: var(--blue); }
+    .connector.primary small { color: var(--blue); font-weight: 700; }
+
+    .product-screen { position: absolute; inset: 0; overflow: hidden; background: linear-gradient(203deg, #8d9ab1 0%, #aaa89f 43%, #d6ccc0 100%); }
+    .product-screen::before { position: absolute; inset: 0; background: radial-gradient(90% 70% at 78% 4%, rgba(255,255,255,.32), transparent 58%), radial-gradient(75% 80% at 8% 100%, rgba(44,50,67,.2), transparent 62%); content: ""; }
+    .product-bar { position: absolute; z-index: 8; inset: 0 0 auto; display: flex; height: 23px; align-items: center; gap: 8px; padding: 0 11px; border-bottom: 1px solid rgba(30,31,32,.13); background: rgba(255,255,255,.3); color: #252629; font-size: 7px; backdrop-filter: blur(15px); }
+    .product-bar .asterisk { font-size: 10px; }
+    .product-bar strong { font-size: 7.5px; }
+    .product-bar .bar-spacer { flex: 1; }
+    .product-bar .live-dot { width: 4px; height: 4px; border-radius: 50%; background: #36a76d; }
+    .product-bar .hamburger { display: grid; width: 16px; height: 15px; place-items: center; border-radius: 4px; background: rgba(255,255,255,.18); font-size: 8px; }
+    .home-area { position: absolute; inset: 23px 0 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+    .mini-card-shell { width: 254px; perspective: 900px; }
+    .mini-card { position: relative; width: 100%; aspect-ratio: 1.586; transform-style: preserve-3d; }
+    .mini-face { position: absolute; inset: 0; overflow: hidden; border: 1px solid rgba(255,255,255,.16); border-radius: 12px; background: linear-gradient(150deg, #44454a, #24252a 55%, #111216); box-shadow: 0 24px 42px -18px rgba(12,12,14,.7), inset 0 1px rgba(255,255,255,.12); color: #f5f5f4; }
+    .mini-face::before { position: absolute; inset: 0; background: radial-gradient(circle at 20% 20%, rgba(255,255,255,.08), transparent 28%), repeating-linear-gradient(90deg, transparent 0 2px, rgba(255,255,255,.012) 2px 3px); content: ""; }
+    .mini-top { position: absolute; z-index: 2; top: 16px; right: 18px; left: 18px; display: flex; justify-content: space-between; color: rgba(255,255,255,.54); font: 6px var(--mono); letter-spacing: .18em; }
+    .mini-name { position: absolute; z-index: 2; inset: 0; display: grid; place-items: center; font-size: 25px; font-weight: 520; letter-spacing: .08em; }
+    .mini-glyph { position: absolute; z-index: 2; top: 47px; left: 50%; display: grid; grid-template-columns: repeat(5, 2px); gap: 2px; transform: translateX(-50%); }
+    .mini-glyph i { width: 2px; height: 2px; border-radius: 1px; background: rgba(255,255,255,.62); }
+    .mini-bottom { position: absolute; z-index: 2; right: 18px; bottom: 13px; left: 18px; display: flex; align-items: end; justify-content: space-between; color: rgba(255,255,255,.48); font: 5.5px/1.7 var(--mono); letter-spacing: .15em; }
+    .mini-bottom b { color: rgba(255,255,255,.76); font-weight: 500; }
+    .quickbox { width: 310px; border: 1px solid rgba(255,255,255,.38); border-radius: 10px; background: rgba(246,246,244,.7); box-shadow: 0 15px 35px -20px rgba(20,21,23,.48); backdrop-filter: blur(18px); }
+    .quickbox-head { display: grid; height: 35px; grid-template-columns: 17px 1fr auto; align-items: center; gap: 7px; padding: 0 10px; border-bottom: 1px solid rgba(31,33,31,.09); color: #777; }
+    .quickbox-head b { color: #8a8780; font-size: 12px; font-weight: 400; }
+    .quickbox-head span { padding-left: 8px; border-left: 1px solid var(--line); font-size: 6px; white-space: nowrap; }
+    .quick-lines { display: grid; gap: 7px; padding: 9px 10px 10px; }
+    .quick-line { display: grid; grid-template-columns: 15px 1fr auto; gap: 7px; align-items: center; }
+    .quick-line i { width: 14px; height: 14px; border-radius: 4px; background: #d4d1cb; }
+    .quick-line b { height: 5px; border-radius: 99px; background: rgba(31,33,31,.3); }
+    .quick-line small { color: #999; font: 5px var(--mono); }
+
+    .back-map { position: absolute; inset: 0; }
+    .back-map svg { width: 100%; height: 100%; }
+    .back-map line { stroke: rgba(199,204,255,.18); stroke-width: .5; }
+    .back-map circle { fill: rgba(235,238,250,.42); }
+    .back-map circle.hot { fill: #c4ccff; filter: drop-shadow(0 0 3px rgba(183,194,255,.8)); }
+    .back-expand { position: absolute; z-index: 4; top: 15px; left: 18px; display: flex; align-items: center; gap: 4px; color: rgba(255,255,255,.65); font: 6px var(--mono); letter-spacing: .13em; }
+    .back-label { position: absolute; z-index: 4; top: 15px; right: 18px; color: rgba(255,255,255,.42); font: 5.5px var(--mono); letter-spacing: .16em; }
+    .back-count { position: absolute; z-index: 4; right: 18px; bottom: 14px; color: rgba(255,255,255,.48); font: 5.5px var(--mono); letter-spacing: .15em; }
+    .hit-target { position: absolute; z-index: 6; top: 9px; left: 11px; width: 92px; height: 25px; border: 1.5px solid var(--orange); border-radius: 5px; background: rgba(217,107,66,.07); }
+    .hit-target::after { position: absolute; top: -18px; left: -1px; padding: 3px 5px; border-radius: 4px; background: var(--orange); color: white; content: "唯一主入口"; font: 5px var(--mono); letter-spacing: .08em; white-space: nowrap; }
+
+    .transition-screen { position: absolute; inset: 0; overflow: hidden; background: #c7c5bd; }
+    .transition-screen::before { position: absolute; inset: 0; background: linear-gradient(rgba(31,33,31,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(31,33,31,.05) 1px, transparent 1px); background-size: 20px 20px; content: ""; }
+    .transition-card, .transition-full { position: absolute; overflow: hidden; border: 1px solid rgba(255,255,255,.16); background: radial-gradient(circle at 50% 46%, rgba(100,115,188,.15), transparent 36%), #101118; color: white; }
+    .transition-card { top: 99px; left: 76px; width: 230px; height: 145px; border-radius: 12px; opacity: .38; }
+    .transition-full { inset: 33px 25px 27px; border-radius: 6px; box-shadow: 0 20px 50px rgba(12,13,16,.3); clip-path: polygon(20% 23%, 74% 23%, 95% 89%, 5% 89%); }
+    .transition-dashed { position: absolute; z-index: 5; top: 92px; left: 69px; width: 244px; height: 159px; border: 1px dashed rgba(50,104,212,.92); border-radius: 14px; }
+    .transition-dashed::before, .transition-dashed::after { position: absolute; width: 7px; height: 7px; border: 1px solid var(--blue); background: white; content: ""; }
+    .transition-dashed::before { top: -4px; left: -4px; }
+    .transition-dashed::after { right: -4px; bottom: -4px; }
+    .transition-arrow { position: absolute; z-index: 6; top: 72px; right: 82px; display: grid; gap: 4px; color: var(--blue); font: 6px var(--mono); letter-spacing: .08em; }
+    .transition-arrow i { width: 80px; height: 1px; background: var(--blue); transform: rotate(-20deg); transform-origin: right; }
+    .transition-rule { position: absolute; z-index: 8; right: 18px; bottom: 16px; left: 18px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+    .transition-rule div { min-height: 40px; padding: 7px 8px; border: 1px solid rgba(255,255,255,.56); border-radius: 7px; background: rgba(248,247,243,.82); backdrop-filter: blur(12px); }
+    .transition-rule b { display: block; color: var(--blue); font: 6px var(--mono); letter-spacing: .08em; }
+    .transition-rule span { display: block; margin-top: 4px; color: #5e615d; font-size: 6px; line-height: 1.4; }
+
+    .sky-screen { position: absolute; inset: 0; overflow: hidden; background: radial-gradient(85% 70% at 50% 46%, rgba(75,85,148,.17), transparent 67%), #0c0d12; color: #f5f5f4; }
+    .sky-screen::before { position: absolute; inset: 0; opacity: .5; background-image: radial-gradient(circle, rgba(235,238,250,.55) 0 .6px, transparent .8px); background-size: 37px 31px; content: ""; }
+    .sky-title { position: absolute; z-index: 5; top: 14px; left: 16px; color: rgba(235,238,250,.46); font: 6.5px var(--mono); letter-spacing: .18em; }
+    .sky-modes { position: absolute; z-index: 5; top: 10px; left: 50%; display: flex; gap: 1px; padding: 2px; border-radius: 999px; background: rgba(255,255,255,.08); transform: translateX(-50%); }
+    .sky-modes span { padding: 4px 10px; border-radius: 999px; color: rgba(255,255,255,.56); font-size: 6px; }
+    .sky-modes span.active { background: #f5f5f4; color: #111216; font-weight: 700; }
+    .sky-3d { position: absolute; z-index: 5; top: 10px; right: 14px; padding: 4px 8px; border: 1px solid rgba(255,255,255,.15); border-radius: 99px; color: rgba(255,255,255,.54); font: 6px var(--mono); letter-spacing: .1em; }
+    .constellation { position: absolute; inset: 0; }
+    .constellation svg { width: 100%; height: 100%; }
+    .constellation line { stroke: rgba(176,188,255,.26); stroke-width: .6; }
+    .constellation circle { fill: #adbaff; filter: drop-shadow(0 0 3px rgba(156,171,255,.8)); }
+    .constellation circle.dim { fill: rgba(235,238,250,.38); filter: none; }
+    .constellation circle.root { fill: white; filter: drop-shadow(0 0 7px rgba(200,210,255,.9)); }
+    .constellation text { fill: #aebaff; font-family: var(--sans); font-size: 6px; font-weight: 650; }
+    .constellation text.sub { fill: rgba(235,238,250,.36); font-family: var(--mono); font-size: 3.6px; font-weight: 400; letter-spacing: .06em; }
+    .sky-legend { position: absolute; z-index: 5; bottom: 13px; left: 16px; color: rgba(235,238,250,.43); font: 6px var(--mono); letter-spacing: .06em; }
+    .sky-help { position: absolute; z-index: 5; right: 16px; bottom: 13px; color: rgba(235,238,250,.27); font: 5.5px var(--mono); }
+    .back-pill { position: absolute; z-index: 8; bottom: 11px; left: 50%; display: flex; align-items: center; gap: 5px; padding: 5px 9px; border: 0; border-radius: 99px; background: rgba(38,39,44,.88); color: white; font-size: 6px; transform: translateX(-50%); box-shadow: 0 8px 18px rgba(0,0,0,.35); }
+    .back-pill i { display: block; width: 12px; height: 7px; border-radius: 2px; background: linear-gradient(150deg,#4a4b52,#24252a); }
+    .evidence-panel { position: absolute; z-index: 9; right: 15px; bottom: 29px; width: 218px; padding: 10px 11px; border: 1px solid rgba(255,255,255,.12); border-radius: 9px; background: rgba(14,14,19,.92); box-shadow: 0 18px 36px rgba(0,0,0,.42); backdrop-filter: blur(16px); }
+    .evidence-head { display: flex; align-items: center; justify-content: space-between; padding-bottom: 7px; border-bottom: 1px solid rgba(255,255,255,.1); color: rgba(235,238,250,.45); font: 5.5px var(--mono); letter-spacing: .18em; }
+    .evidence-panel p { margin: 8px 0 7px; color: #f5f5f4; font-family: var(--serif); font-size: 9px; line-height: 1.5; }
+    .evidence-meta { color: rgba(235,238,250,.42); font: 5px var(--mono); }
+    .evidence-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; color: rgba(235,238,250,.55); font-size: 5.5px; }
+    .selected-ring { position: absolute; z-index: 7; top: 48%; left: 61%; width: 22px; height: 22px; border: 1px solid rgba(174,186,255,.78); border-radius: 50%; box-shadow: 0 0 15px rgba(153,169,255,.55); transform: translate(-50%,-50%); }
+
+    .secondary { width: 1840px; margin-top: 82px; }
+    .secondary-grid { display: grid; grid-template-columns: 370px 85px 370px 85px 500px; align-items: center; }
+    .entry-card { min-height: 175px; padding: 19px; border: 1px solid var(--line); border-radius: 12px; background: rgba(248,247,243,.76); box-shadow: 0 12px 34px rgba(41,42,39,.08); }
+    .entry-card .entry-kicker { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font: 8px var(--mono); letter-spacing: .1em; }
+    .entry-card h3 { margin: 15px 0 7px; font-size: 17px; letter-spacing: -.025em; }
+    .entry-card p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.65; }
+    .menu-mock { display: grid; gap: 5px; width: 200px; margin-top: 15px; padding: 7px; border: 1px solid rgba(255,255,255,.16); border-radius: 8px; background: #2e2f34; color: white; }
+    .menu-mock span { padding: 5px 7px; border-radius: 5px; color: rgba(255,255,255,.67); font-size: 7px; }
+    .menu-mock span.active { background: var(--blue); color: white; }
+    .spotlight-mock { display: flex; height: 40px; align-items: center; gap: 9px; margin-top: 20px; padding: 0 11px; border: 1px solid rgba(31,33,31,.12); border-radius: 9px; background: rgba(255,255,255,.74); box-shadow: 0 8px 18px rgba(31,33,31,.08); }
+    .spotlight-mock b { flex: 1; color: #9a9b97; font-size: 9px; font-weight: 450; }
+    .spotlight-mock span { padding-left: 9px; border-left: 1px solid var(--line); color: var(--blue); font-size: 8px; font-weight: 650; }
+    .small-connector { position: relative; width: 62px; height: 1px; justify-self: center; background: var(--line-strong); }
+    .small-connector::after { position: absolute; top: -4px; right: 0; width: 8px; height: 8px; border-top: 1px solid var(--line-strong); border-right: 1px solid var(--line-strong); content: ""; transform: rotate(45deg); }
+    .route-target { display: grid; min-height: 175px; place-items: center; padding: 18px; border: 1px dashed rgba(50,104,212,.46); border-radius: 12px; background: var(--blue-soft); text-align: center; }
+    .route-target strong { font-family: var(--serif); font-size: 24px; font-weight: 400; }
+    .route-target p { max-width: 360px; margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+
+    .specs { display: grid; width: 1840px; grid-template-columns: 1.05fr .95fr .95fr; gap: 18px; margin-top: 72px; }
+    .spec-card { min-height: 230px; padding: 22px 24px; border: 1px solid var(--line); border-radius: 13px; background: rgba(248,247,243,.78); box-shadow: 0 10px 30px rgba(41,42,39,.07); }
+    .spec-card h3 { margin: 0 0 15px; font-size: 13px; }
+    .spec-card p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.7; }
+    .route-code { display: grid; gap: 8px; margin-top: 14px; }
+    .route-code div { display: grid; min-height: 35px; grid-template-columns: 120px 1fr; align-items: center; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.63); }
+    .route-code code { color: var(--blue); font: 8px var(--mono); }
+    .route-code span { color: var(--muted); font-size: 9px; }
+    .checklist { display: grid; gap: 10px; margin-top: 10px; }
+    .checklist div { display: grid; grid-template-columns: 18px 1fr; gap: 8px; color: #555854; font-size: 10px; line-height: 1.45; }
+    .checklist i { display: grid; width: 17px; height: 17px; place-items: center; border-radius: 50%; background: var(--green-soft); color: var(--green); font-style: normal; font-size: 8px; font-weight: 800; }
+    .avoid-list { display: grid; gap: 9px; margin-top: 11px; }
+    .avoid-list div { padding: 9px 10px; border-left: 3px solid var(--orange); border-radius: 0 7px 7px 0; background: var(--orange-soft); color: #695249; font-size: 9px; line-height: 1.45; }
+    .meaning-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 13px; }
+    .meaning-grid div { padding: 11px; border: 1px solid var(--line); border-radius: 9px; background: rgba(255,255,255,.58); }
+    .meaning-grid b { display: block; color: var(--blue); font: 7px var(--mono); letter-spacing: .08em; }
+    .meaning-grid span { display: block; margin-top: 6px; color: #565954; font-size: 9px; line-height: 1.5; }
+
+    .proposal { width: 1840px; margin-top: 72px; }
+    .proposal-grid { display: grid; grid-template-columns: 520px 720px 520px; gap: 22px; align-items: stretch; }
+    .journey-panel, .recommended-panel, .card-role-panel { min-height: 390px; padding: 22px; border: 1px solid var(--line); border-radius: 14px; background: rgba(248,247,243,.8); box-shadow: 0 12px 34px rgba(41,42,39,.08); }
+    .proposal-kicker { color: var(--blue); font: 8px var(--mono); font-weight: 700; letter-spacing: .12em; }
+    .proposal h3 { margin: 9px 0 6px; font-family: var(--serif); font-size: 23px; font-weight: 400; letter-spacing: -.025em; }
+    .proposal-copy { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.65; }
+    .journey-track { display: grid; gap: 8px; margin-top: 18px; }
+    .journey-step { display: grid; min-height: 46px; grid-template-columns: 25px 1fr auto; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: rgba(255,255,255,.62); }
+    .journey-step i { display: grid; width: 23px; height: 23px; place-items: center; border-radius: 7px; background: var(--blue-soft); color: var(--blue); font: 8px var(--mono); font-style: normal; font-weight: 800; }
+    .journey-step b { display: block; font-size: 10px; }
+    .journey-step small { display: block; margin-top: 3px; color: var(--muted); font-size: 8px; }
+    .journey-step em { color: var(--faint); font: 7px var(--mono); font-style: normal; }
+    .journey-step.once { border-color: rgba(217,107,66,.28); background: var(--orange-soft); }
+    .journey-step.once i { background: var(--orange); color: white; }
+    .return-rule { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px 11px; border-radius: 9px; background: var(--green-soft); color: #416653; font-size: 9px; line-height: 1.5; }
+    .return-rule i { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--green); }
+
+    .recommended-panel { padding: 0; overflow: hidden; background: #b8b5ac; }
+    .recommended-home { position: relative; min-height: 390px; overflow: hidden; background: linear-gradient(203deg, #8d9ab1 0%, #aaa89f 43%, #d6ccc0 100%); }
+    .recommended-home::before { position: absolute; inset: 0; background: radial-gradient(90% 70% at 78% 4%, rgba(255,255,255,.34), transparent 58%), radial-gradient(75% 80% at 8% 100%, rgba(44,50,67,.2), transparent 62%); content: ""; }
+    .recommended-home .product-bar { height: 31px; padding: 0 14px; font-size: 8px; }
+    .my-card-entry { display: flex; align-items: center; gap: 7px; padding: 5px 8px; border: 1px solid rgba(255,255,255,.28); border-radius: 7px; background: rgba(255,255,255,.18); color: #333538; font-size: 7px; }
+    .my-card-entry i { width: 16px; height: 10px; border-radius: 2px; background: linear-gradient(145deg,#4a4b50,#1c1d22); }
+    .daily-core { position: absolute; z-index: 2; inset: 31px 0 0; display: grid; align-content: center; justify-items: center; padding: 28px 54px 34px; }
+    .daily-core h4 { margin: 0 0 7px; color: #292b2b; font-family: var(--serif); font-size: 28px; font-weight: 400; letter-spacing: -.035em; }
+    .daily-core > p { margin: 0 0 18px; color: rgba(42,44,43,.62); font-size: 9px; }
+    .ask-box { display: grid; width: 100%; grid-template-columns: 22px 1fr auto auto; align-items: center; gap: 9px; padding: 9px 10px 9px 13px; border: 1px solid rgba(255,255,255,.52); border-radius: 12px; background: rgba(248,247,243,.82); box-shadow: 0 22px 48px -28px rgba(20,21,23,.52); backdrop-filter: blur(24px); }
+    .ask-box > span { color: #7b7a75; font-size: 11px; }
+    .ask-box > b { color: #77766f; font-size: 11px; font-weight: 420; }
+    .ask-box button { padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; background: rgba(255,255,255,.55); color: #5f625e; font-size: 8px; }
+    .ask-box button.primary { border-color: #252825; background: #252825; color: white; }
+    .now-cards { display: grid; width: 100%; grid-template-columns: repeat(3, 1fr); gap: 9px; margin-top: 12px; }
+    .now-card { min-height: 76px; padding: 10px; border: 1px solid rgba(255,255,255,.38); border-radius: 10px; background: rgba(248,247,243,.63); backdrop-filter: blur(18px); }
+    .now-card small { color: #85827b; font: 6.5px var(--mono); letter-spacing: .07em; }
+    .now-card b { display: block; margin-top: 9px; color: #343633; font-size: 9px; line-height: 1.4; }
+    .now-card span { display: block; margin-top: 7px; color: #898780; font-size: 7px; }
+    .home-callout { position: absolute; z-index: 5; right: 13px; bottom: 12px; padding: 6px 8px; border-radius: 7px; background: rgba(37,40,37,.88); color: white; font: 7px var(--mono); letter-spacing: .05em; }
+
+    .role-card-preview { position: relative; height: 164px; margin-top: 18px; overflow: hidden; border: 1px solid rgba(255,255,255,.16); border-radius: 13px; background: linear-gradient(150deg,#46474c,#24252a 55%,#111216); box-shadow: 0 24px 44px -23px rgba(10,10,12,.72), inset 0 1px rgba(255,255,255,.14); color: white; }
+    .role-card-preview .mini-top { top: 18px; right: 18px; left: 18px; }
+    .role-card-preview .mini-name { font-size: 23px; }
+    .role-card-preview .mini-bottom { right: 18px; bottom: 14px; left: 18px; }
+    .role-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+    .role-actions span { display: grid; height: 34px; place-items: center; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.58); color: #5d605c; font-size: 8px; }
+    .role-boundary { margin-top: 13px; padding: 10px 11px; border-left: 3px solid var(--orange); border-radius: 0 8px 8px 0; background: var(--orange-soft); color: #695249; font-size: 9px; line-height: 1.55; }
+
+    .interaction-audit { width: 1840px; margin-top: 72px; }
+    .audit-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    .audit-card { position: relative; min-height: 178px; padding: 17px 18px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: rgba(248,247,243,.78); box-shadow: 0 10px 28px rgba(41,42,39,.065); }
+    .audit-card::after { position: absolute; right: -24px; bottom: -36px; width: 110px; height: 110px; border-radius: 50%; background: var(--blue-soft); content: ""; }
+    .audit-card.proposed::after { background: var(--orange-soft); }
+    .audit-head { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .audit-head span:first-child { color: var(--muted); font: 7.5px var(--mono); letter-spacing: .11em; }
+    .audit-status { padding: 4px 6px; border: 1px solid rgba(46,139,98,.24); border-radius: 99px; background: var(--green-soft); color: var(--green); font: 6.5px var(--mono); letter-spacing: .06em; }
+    .audit-status.proposed { border-color: rgba(217,107,66,.25); background: var(--orange-soft); color: var(--orange); }
+    .audit-card h3 { position: relative; z-index: 2; margin: 15px 0 5px; font-size: 15px; }
+    .audit-card p { position: relative; z-index: 2; margin: 0; color: var(--muted); font-size: 9px; line-height: 1.55; }
+    .audit-route { position: relative; z-index: 2; display: flex; align-items: center; gap: 5px; margin-top: 13px; color: #575a56; font: 7px var(--mono); }
+    .audit-route i { width: 14px; height: 1px; background: var(--line-strong); }
+    .audit-route b { color: var(--blue); font-weight: 700; }
+    .audit-foot { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; padding: 13px 14px; border: 1px dashed var(--line-strong); border-radius: 10px; background: rgba(255,255,255,.35); }
+    .audit-foot strong { margin-right: 5px; color: var(--muted); font: 7px var(--mono); letter-spacing: .1em; }
+    .audit-foot span { padding: 4px 7px; border-radius: 99px; background: rgba(31,33,31,.07); color: #656761; font-size: 7px; }
+
+    .chat-flow { width: 2478px; margin-top: 72px; }
+    .chat-lane { display: flex; align-items: flex-start; }
+    .chat-frame { background: #e4e2dc; }
+    .mini-chat { position: absolute; inset: 0; overflow: hidden; background: #f8f7f3; color: #242624; }
+    .mini-chat-bar { display: flex; height: 34px; align-items: center; gap: 8px; padding: 0 11px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.76); }
+    .mini-chat-bar b { font-size: 8px; }
+    .mini-chat-bar span { color: var(--muted); font-size: 6.5px; }
+    .mini-chat-bar .grow { flex: 1; }
+    .mini-chat-button { padding: 4px 7px; border: 1px solid var(--line); border-radius: 5px; background: white; font-size: 6.5px; }
+    .mini-chat-body { position: absolute; inset: 34px 0 0; display: flex; }
+    .mini-session-drawer { width: 0; overflow: hidden; border-right: 1px solid var(--line); background: #efeee9; transition: width .25s var(--ease); }
+    .mini-chat.drawer .mini-session-drawer { width: 148px; }
+    .mini-session-inner { width: 148px; padding: 10px 8px; }
+    .mini-session-label { display: block; margin: 6px 6px 5px; color: var(--faint); font: 5.5px var(--mono); letter-spacing: .1em; }
+    .mini-session-item { display: grid; gap: 3px; padding: 7px 7px; border-radius: 6px; color: #5f625e; font-size: 7px; }
+    .mini-session-item.active { background: white; color: #222; box-shadow: 0 2px 8px rgba(31,33,31,.06); }
+    .mini-session-item small { color: var(--faint); font-size: 5.5px; }
+    .mini-thread { position: relative; flex: 1; min-width: 0; padding: 20px 37px 55px; overflow: hidden; }
+    .mini-thread-title { margin-bottom: 16px; text-align: center; }
+    .mini-thread-title b { display: block; font-family: var(--serif); font-size: 15px; font-weight: 400; }
+    .mini-thread-title span { display: block; margin-top: 4px; color: var(--faint); font: 5.5px var(--mono); }
+    .mini-message { max-width: 78%; margin-bottom: 9px; padding: 8px 10px; border-radius: 9px; font-size: 7.5px; line-height: 1.5; }
+    .mini-message.user { margin-left: auto; border-bottom-right-radius: 3px; background: #252825; color: white; }
+    .mini-message.model { border: 1px solid var(--line); border-bottom-left-radius: 3px; background: white; color: #444743; }
+    .mini-cites { display: flex; gap: 5px; margin-top: 6px; }
+    .mini-cites span { padding: 3px 5px; border-radius: 4px; background: var(--blue-soft); color: var(--blue); font: 5.5px var(--mono); }
+    .mini-compose { position: absolute; right: 25px; bottom: 14px; left: 25px; display: flex; height: 32px; align-items: center; gap: 7px; padding: 0 9px; border: 1px solid var(--line); border-radius: 9px; background: white; box-shadow: 0 8px 24px rgba(31,33,31,.1); }
+    .mini-compose span { flex: 1; color: var(--faint); font-size: 7px; }
+    .mini-compose i { display: grid; width: 19px; height: 19px; place-items: center; border-radius: 6px; background: #252825; color: white; font: 7px var(--mono); font-style: normal; }
+    .mini-home-entry { position: absolute; inset: 34px 0 0; display: grid; place-items: center; padding: 36px; background: linear-gradient(203deg,#a4adbc,#bdb8ad 55%,#d7cec1); }
+    .mini-home-stack { width: 330px; text-align: center; }
+    .mini-home-stack h4 { margin: 0 0 6px; font-family: var(--serif); font-size: 21px; font-weight: 400; }
+    .mini-home-stack p { margin: 0 0 15px; color: #6b6d68; font-size: 7px; }
+    .mini-ask-entry { display: flex; height: 37px; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid rgba(255,255,255,.6); border-radius: 9px; background: rgba(248,247,243,.78); box-shadow: 0 12px 30px -18px rgba(20,21,23,.5); color: #777; font-size: 7px; }
+    .mini-ask-entry b { flex: 1; text-align: left; font-weight: 400; }
+    .mini-ask-entry span { padding: 4px 7px; border-radius: 5px; background: #252825; color: white; }
+    .mini-continue-card { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 9px 10px; border-radius: 8px; background: rgba(248,247,243,.64); text-align: left; }
+    .mini-continue-card i { width: 20px; height: 20px; border-radius: 6px; background: #dedbd4; }
+    .mini-continue-card b { display: block; font-size: 7.5px; }
+    .mini-continue-card small { display: block; margin-top: 3px; color: var(--muted); font-size: 6px; }
+
+    .chat-play-button { border-color: var(--blue); background: var(--blue); }
+    .chat-play-button:hover { border-color: #2356bc; background: #2356bc; }
+    .chat-player-window { position: relative; width: min(1240px,calc(100vw - 68px)); height: min(820px,calc(100vh - 68px)); overflow: hidden; border: 1px solid rgba(255,255,255,.2); border-radius: 16px; background: #f8f7f3; box-shadow: 0 50px 120px rgba(0,0,0,.55); }
+    .chat-appbar { display: grid; height: 52px; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 12px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.82); backdrop-filter: blur(24px); }
+    .chat-appbar-left, .chat-appbar-right { display: flex; align-items: center; gap: 8px; }
+    .chat-appbar-right { justify-content: flex-end; }
+    .chat-appbar button { min-height: 30px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.78); cursor: pointer; font-size: 9px; }
+    .chat-appbar button:hover { border-color: var(--blue); color: var(--blue); }
+    .chat-appbar strong { font-size: 11px; }
+    .chat-appbar small { color: var(--muted); font: 8px var(--mono); }
+    .chat-app-body { position: absolute; inset: 52px 0 0; display: flex; min-height: 0; }
+    .chat-sidebar { width: 0; flex: none; overflow: hidden; border-right: 1px solid transparent; background: #efeee9; transition: width 300ms var(--ease), border-color 300ms ease; }
+    .chat-player-window.sidebar-open .chat-sidebar { width: 286px; border-color: var(--line); }
+    .chat-sidebar-inner { width: 286px; height: 100%; padding: 16px 12px; overflow-y: auto; }
+    .chat-new { width: 100%; height: 38px; border: 1px solid var(--line); border-radius: 9px; background: white; cursor: pointer; font-size: 10px; text-align: left; padding: 0 11px; }
+    .chat-group-label { display: block; margin: 18px 9px 7px; color: var(--faint); font: 8px var(--mono); letter-spacing: .11em; }
+    .chat-session-item { display: grid; width: 100%; gap: 4px; padding: 10px 11px; border: 0; border-radius: 8px; background: transparent; color: #5d605c; cursor: pointer; text-align: left; }
+    .chat-session-item:hover { background: rgba(255,255,255,.65); }
+    .chat-session-item.active { background: white; color: var(--ink); box-shadow: 0 4px 14px rgba(31,33,31,.07); }
+    .chat-session-item b { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .chat-session-item span { color: var(--faint); font: 7px var(--mono); }
+    .chat-main { position: relative; flex: 1; min-width: 0; background: #f8f7f3; }
+    .chat-scroll { position: absolute; inset: 0; overflow-y: auto; padding: 34px max(48px,calc((100% - 760px)/2)) 132px; }
+    .chat-thread-heading { margin-bottom: 32px; text-align: center; }
+    .chat-thread-heading h2 { margin: 0; font-family: var(--serif); font-size: 31px; font-weight: 400; letter-spacing: -.035em; }
+    .chat-thread-heading p { margin: 7px 0 0; color: var(--muted); font: 9px var(--mono); }
+    .chat-message { max-width: 78%; margin-bottom: 16px; padding: 13px 15px; border-radius: 14px; font-size: 12px; line-height: 1.7; animation: wFade .2s ease; }
+    .chat-message.user { margin-left: auto; border-bottom-right-radius: 4px; background: #242724; color: white; }
+    .chat-message.assistant { border: 1px solid var(--line); border-bottom-left-radius: 4px; background: white; color: #40433f; box-shadow: 0 8px 24px rgba(31,33,31,.05); }
+    .chat-message-meta { display: block; margin-top: 8px; color: var(--faint); font: 8px var(--mono); }
+    .chat-evidence { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .chat-evidence span { padding: 5px 7px; border-radius: 6px; background: var(--blue-soft); color: var(--blue); font: 7.5px var(--mono); }
+    .chat-empty { display: grid; min-height: 440px; place-items: center; color: var(--muted); text-align: center; }
+    .chat-empty strong { display: block; color: var(--ink); font-family: var(--serif); font-size: 30px; font-weight: 400; }
+    .chat-empty span { display: block; margin-top: 8px; font-size: 10px; }
+    .chat-composer { position: absolute; z-index: 5; right: max(34px,calc((100% - 790px)/2)); bottom: 24px; left: max(34px,calc((100% - 790px)/2)); display: grid; min-height: 58px; grid-template-columns: 1fr auto; align-items: center; gap: 10px; padding: 9px 10px 9px 17px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.92); box-shadow: 0 18px 46px rgba(31,33,31,.15); backdrop-filter: blur(24px); }
+    .chat-composer input { min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 13px; }
+    .chat-composer button { width: 39px; height: 39px; border: 0; border-radius: 10px; background: #242724; color: white; cursor: pointer; }
+    .chat-composer button:hover { background: var(--blue); }
+
+    /* The review board intentionally presents one route only. The older audit
+       lanes remain in the file as source material, but are not shown. */
+    #core-flow, .secondary, .interaction-audit, .proposal, .chat-flow, .specs, #play-flow, #play-chat { display: none !important; }
+    .board { width: 5200px; }
+    .unified-flow { width: 5140px; }
+    .unified-lane { display: flex; align-items: flex-start; }
+    .unified-wrap { width: 390px; flex: none; }
+    .unified-meta { display: flex; min-height: 51px; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 0 2px 10px; }
+    .unified-meta div { display: grid; gap: 4px; }
+    .unified-meta strong { font-size: 11px; }
+    .unified-meta small { color: var(--muted); font: 8px var(--mono); }
+    .unified-screen { position: relative; width: 390px; height: 278px; overflow: hidden; border: 1px solid rgba(31,33,31,.2); border-radius: 6px; background: #f8f7f3; box-shadow: var(--shadow); }
+    .unified-note { display: grid; grid-template-columns: 17px 1fr; gap: 7px; margin: 10px 2px 0; color: var(--muted); font-size: 8.5px; line-height: 1.5; }
+    .unified-note b { display: grid; width: 17px; height: 17px; place-items: center; border-radius: 50%; background: var(--blue); color: white; font: 7px var(--mono); }
+    .unified-connector { display: grid; width: 86px; flex: none; place-items: center; padding-top: 181px; }
+    .unified-connector small { margin-bottom: 8px; color: var(--blue); font: 6.5px var(--mono); text-align: center; }
+    .unified-connector .arrow { width: 62px; background: var(--blue); }
+    .unified-connector .arrow::after { border-color: var(--blue); }
+    .unified-toolbar { position: absolute; z-index: 8; inset: 0 0 auto; display: flex; height: 27px; align-items: center; gap: 6px; padding: 0 9px; border-bottom: 1px solid rgba(31,33,31,.12); background: rgba(255,255,255,.78); color: #30322f; font-size: 6px; backdrop-filter: blur(14px); }
+    .unified-toolbar b { font-size: 6.5px; }
+    .unified-toolbar .grow { flex: 1; }
+    .unified-toolbar span { color: var(--muted); }
+    .unified-chip { padding: 3px 5px; border: 1px solid var(--line); border-radius: 5px; background: white; color: #545752 !important; }
+    .setup-mini { position: absolute; z-index: 2; inset: 27px 0 0; display: grid; place-items: center; background: #f0eee8; }
+    .setup-panel { position: relative; z-index: 3; width: 270px; padding: 18px; border: 1px solid var(--line); border-radius: 13px; background: #fff; box-shadow: 0 18px 40px -24px rgba(31,33,31,.35); }
+    .setup-panel em { color: var(--blue); font: 6px var(--mono); font-style: normal; letter-spacing: .1em; }
+    .setup-panel h4 { margin: 7px 0 5px; font-family: var(--serif); font-size: 18px; font-weight: 400; }
+    .setup-panel p { margin: 0; color: var(--muted); font-size: 6.5px; line-height: 1.55; }
+    .setup-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 12px; }
+    .setup-fields span { height: 23px; padding: 7px; border: 1px solid var(--line); border-radius: 5px; color: var(--faint); font-size: 6px; }
+    .setup-fields span:first-child { grid-column: 1 / -1; }
+    .setup-cta { display: grid; height: 27px; place-items: center; margin-top: 7px; border-radius: 6px; background: #242724; color: white; font-size: 7px; }
+    .setup-result { display: flex; align-items: center; gap: 5px; margin-top: 7px; color: var(--green); font: 5.5px var(--mono); }
+    .setup-result::before { width: 5px; height: 5px; border-radius: 50%; background: var(--green); content: ""; }
+    .reveal-mini { position: absolute; inset: 0; display: grid; place-items: center; background: #f1efe9; }
+    .reveal-mini .dossier { width: 92px; height: 125px; }
+    .reveal-inner { position: absolute; width: 82px; height: 103px; display: grid; place-content: center; gap: 5px; border-radius: 6px; background: white; color: #242624; text-align: center; transform: translate(48px,-7px); box-shadow: 0 15px 30px rgba(31,33,31,.18); }
+    .reveal-inner b { font-size: 8px; }
+    .reveal-inner span { color: var(--muted); font-size: 5px; }
+    .reveal-cover { transform: translateX(-26px) rotateY(-38deg); }
+    .unified-home { position: absolute; inset: 27px 0 0; display: grid; align-content: center; justify-items: center; gap: 9px; padding: 18px 36px; background: linear-gradient(203deg,#9aa5b8,#b8b2a8 55%,#d8cfc3); }
+    .home-card-mini { width: 180px; height: 113px; border-radius: 9px; background: linear-gradient(150deg,#42434a,#1a1b20); box-shadow: 0 17px 32px -18px rgba(10,10,12,.7); color: white; position: relative; }
+    .home-card-mini b { position: absolute; inset: 0; display: grid; place-items: center; font-size: 16px; }
+    .home-card-mini span { position: absolute; right: 12px; bottom: 10px; color: rgba(255,255,255,.42); font: 4.5px var(--mono); letter-spacing: .1em; }
+    .home-command-mini { width: 270px; overflow: hidden; border: 1px solid rgba(255,255,255,.5); border-radius: 9px; background: rgba(248,247,243,.78); }
+    .home-command-head { display: flex; height: 30px; align-items: center; gap: 7px; padding: 0 9px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 6.5px; }
+    .home-command-head b { flex: 1; font-weight: 400; }
+    .home-command-head span { color: var(--blue); }
+    .home-now-mini { display: grid; grid-template-columns: repeat(3,1fr); gap: 5px; padding: 7px; }
+    .home-now-mini div { padding: 6px; border-radius: 5px; background: rgba(255,255,255,.55); }
+    .home-now-mini small { display: block; color: var(--faint); font: 4.5px var(--mono); }
+    .home-now-mini b { display: block; margin-top: 4px; font-size: 5.5px; }
+    .unified-chat { position: absolute; inset: 27px 0 0; display: flex; background: #f8f7f3; }
+    .unified-chat-side { width: 0; overflow: hidden; border-right: 1px solid var(--line); background: #efeee9; }
+    .unified-chat.has-side .unified-chat-side { width: 112px; }
+    .unified-chat-side-inner { width: 112px; padding: 8px 6px; }
+    .unified-chat-side small { display: block; margin: 7px 5px 4px; color: var(--faint); font: 4.5px var(--mono); }
+    .unified-chat-side span { display: block; padding: 6px; border-radius: 5px; color: #666; font-size: 5.5px; }
+    .unified-chat-side span.active { background: white; color: #222; }
+    .unified-thread { position: relative; flex: 1; padding: 18px 22px 44px; }
+    .unified-thread h4 { margin: 0 0 12px; font-family: var(--serif); font-size: 13px; font-weight: 400; text-align: center; }
+    .unified-bubble { max-width: 78%; margin-bottom: 7px; padding: 7px 8px; border-radius: 7px; font-size: 5.8px; line-height: 1.5; }
+    .unified-bubble.user { margin-left: auto; background: #242724; color: white; }
+    .unified-bubble.ai { border: 1px solid var(--line); background: white; }
+    .unified-evidence { display: flex; gap: 4px; margin-top: 5px; }
+    .unified-evidence span { padding: 3px 4px; border-radius: 4px; background: var(--blue-soft); color: var(--blue); font: 4.5px var(--mono); }
+    .unified-compose { position: absolute; right: 15px; bottom: 12px; left: 15px; height: 27px; padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: white; color: var(--faint); font-size: 5.5px; }
+    .rewind-mini { position: absolute; inset: 27px 0 0; padding: 25px 34px; background: white; }
+    .rewind-mini em { color: var(--faint); font: 5px var(--mono); font-style: normal; letter-spacing: .12em; }
+    .rewind-mini h4 { margin: 6px 0 5px; font-family: var(--serif); font-size: 19px; font-weight: 400; }
+    .rewind-mini > p { margin: 0 0 14px; color: var(--muted); font-size: 6.5px; }
+    .rewind-row { display: grid; grid-template-columns: 52px 1fr auto; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
+    .rewind-row span { color: var(--faint); font: 5px var(--mono); }
+    .rewind-row b { font-size: 6.5px; }
+    .rewind-row i { color: var(--blue); font: 5px var(--mono); font-style: normal; }
+    .card-actions-mini { position: absolute; inset: 27px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 11px; align-content: center; padding: 28px; background: #101116; }
+    .share-card-mini { height: 145px; padding: 15px; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: linear-gradient(150deg,#34353d,#17181d); color: white; }
+    .share-card-mini small { color: rgba(255,255,255,.42); font: 5px var(--mono); }
+    .share-card-mini p { margin: 28px 0 0; font-family: var(--serif); font-size: 11px; line-height: 1.5; }
+    .card-action-list { display: grid; gap: 7px; align-content: center; }
+    .card-action-list span { padding: 9px 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 7px; color: rgba(255,255,255,.75); font-size: 6.5px; }
+    .card-action-list span.primary { border-color: var(--blue); background: var(--blue); color: white; }
+    .agent-mini { position: absolute; inset: 27px 0 0; display: grid; align-content: center; gap: 9px; padding: 26px 34px; background: #f4f2ed; }
+    .agent-pass { display: grid; grid-template-columns: 1fr 44px 1fr; gap: 9px; align-items: center; }
+    .agent-pass div { height: 73px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: white; font-size: 6px; }
+    .agent-pass i { display: grid; height: 54px; place-items: center; border-radius: 9px; background: #242724; color: white; font: 6px var(--mono); font-style: normal; }
+    .agent-report { padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: white; }
+    .agent-report b { font-size: 7px; }
+    .agent-report span { display: block; margin-top: 5px; color: var(--muted); font-size: 5.5px; }
+
+    .unified-player-window { position: relative; width: min(1180px,calc(100vw - 68px)); height: min(780px,calc(100vh - 68px)); overflow: hidden; border: 1px solid rgba(255,255,255,.22); border-radius: 16px; background: #111216; box-shadow: 0 50px 120px rgba(0,0,0,.55); }
+    .unified-player-head { display: grid; height: 52px; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 13px 0 18px; border-bottom: 1px solid rgba(255,255,255,.1); color: white; }
+    .unified-player-head strong { font-size: 10px; }
+    .unified-player-head span { color: rgba(255,255,255,.45); font: 8px var(--mono); }
+    .unified-player-head button { justify-self: end; width: 30px; height: 30px; border: 1px solid rgba(255,255,255,.14); border-radius: 8px; background: rgba(255,255,255,.06); color: white; cursor: pointer; }
+    .unified-stage { position: absolute; inset: 52px 0 72px; display: grid; place-items: center; overflow: hidden; background: radial-gradient(circle at 50% 45%,#353842,#18191e 64%,#111216); }
+    .unified-stage-copy { position: relative; isolation: isolate; flex: none; background: #f8f7f3; opacity: 1; transform: scale(1.72); transform-origin: center; }
+    .unified-player-foot { position: absolute; inset: auto 0 0; display: grid; height: 72px; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 18px; border-top: 1px solid rgba(255,255,255,.1); color: white; }
+    .unified-player-foot button { min-width: 92px; height: 36px; border: 1px solid rgba(255,255,255,.15); border-radius: 9px; background: rgba(255,255,255,.07); color: white; cursor: pointer; }
+    .unified-player-foot button:last-child { justify-self: end; border-color: var(--blue); background: var(--blue); }
+    .unified-player-foot button:disabled { opacity: .28; cursor: default; }
+    .unified-progress { display: flex; gap: 5px; }
+    .unified-progress i { display: block; width: 20px; height: 3px; border-radius: 99px; background: rgba(255,255,255,.15); }
+    .unified-progress i.active { background: #8fa6ff; }
+
+    .selection-info { position: fixed; z-index: 85; right: 18px; bottom: 18px; display: flex; width: 310px; align-items: center; gap: 11px; padding: 11px 12px; border: 1px solid rgba(255,255,255,.65); border-radius: 11px; background: rgba(248,247,243,.88); box-shadow: 0 16px 42px rgba(31,33,31,.16); backdrop-filter: blur(20px); transform: translateY(130%); transition: transform 220ms var(--ease); }
+    .selection-info.show { transform: none; }
+    .selection-info b { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 7px; background: var(--blue); color: white; font: 8px var(--mono); }
+    .selection-info span { display: grid; gap: 3px; }
+    .selection-info strong { font-size: 10px; }
+    .selection-info small { color: var(--muted); font-size: 8px; }
+
+    .player { position: fixed; z-index: 200; inset: 0; display: grid; place-items: center; padding: 34px; background: rgba(22,23,23,.72); backdrop-filter: blur(18px); animation: player-in 180ms ease both; }
+    @keyframes player-in { from { opacity: 0; } }
+    .player-window { position: relative; width: min(1180px, calc(100vw - 68px)); height: min(780px, calc(100vh - 68px)); overflow: hidden; border: 1px solid rgba(255,255,255,.22); border-radius: 16px; background: #111216; box-shadow: 0 50px 120px rgba(0,0,0,.55); }
+    .player-head { position: absolute; z-index: 30; inset: 0 0 auto; display: grid; height: 48px; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 12px 0 17px; border-bottom: 1px solid rgba(255,255,255,.1); background: rgba(20,21,25,.76); color: white; backdrop-filter: blur(20px); }
+    .player-head strong { font-size: 10px; letter-spacing: .04em; }
+    .player-steps { display: flex; align-items: center; gap: 5px; }
+    .player-steps i { display: block; width: 28px; height: 3px; border-radius: 99px; background: rgba(255,255,255,.15); }
+    .player-steps i.active { background: #8fa6ff; }
+    .player-close { justify-self: end; width: 30px; height: 30px; border: 1px solid rgba(255,255,255,.12); border-radius: 8px; background: rgba(255,255,255,.06); color: white; cursor: pointer; }
+    .player-stage { position: absolute; inset: 48px 0 0; overflow: hidden; background: linear-gradient(203deg, #8d9ab1, #aaa89f 45%, #d6ccc0); }
+    .demo-opening { position: absolute; z-index: 20; inset: 0; display: grid; place-items: center; background: #f1efe9; cursor: pointer; transition: opacity 520ms ease; }
+    .demo-opening .dossier { width: 230px; height: 308px; border-radius: 14px; }
+    .demo-opening .dossier::after { top: 24px; left: 23px; font-size: 20px; }
+    .demo-opening .dossier-meta { right: 22px; bottom: 21px; left: 22px; font-size: 8px; }
+    .demo-opening .opening-title { top: 70px; font-size: 10px; }
+    .demo-opening .opening-hint { top: calc(50% + 190px); font-size: 10px; }
+    .player-window:not([data-step="cover"]) .demo-opening { opacity: 0; pointer-events: none; }
+    .demo-home { position: absolute; inset: 0; display: grid; place-items: center; padding-bottom: 12px; transition: opacity 180ms ease; }
+    .demo-home::before { position: absolute; inset: 0; background: radial-gradient(90% 70% at 78% 4%, rgba(255,255,255,.3), transparent 58%); content: ""; }
+    .demo-stack { position: relative; z-index: 2; display: grid; justify-items: center; gap: 19px; }
+    .demo-card-shell { width: min(540px, 62vw); perspective: 1400px; }
+    .demo-card { position: relative; width: 100%; aspect-ratio: 1.586; cursor: pointer; transform-style: preserve-3d; transition: transform 720ms var(--ease); }
+    .demo-card.back { transform: rotateY(180deg); }
+    .demo-face { position: absolute; inset: 0; overflow: hidden; border: 1px solid rgba(255,255,255,.16); border-radius: 21px; backface-visibility: hidden; background: linear-gradient(150deg,#46474c,#24252a 55%,#111216); box-shadow: 0 46px 80px -30px rgba(10,10,12,.72), inset 0 1px rgba(255,255,255,.14); color: white; }
+    .demo-face.back-face { pointer-events: none; transform: rotateY(180deg); }
+    .demo-card.back .demo-face:first-child { pointer-events: none; }
+    .demo-card.back .demo-face.back-face { pointer-events: auto; }
+    .demo-face .mini-top { top: 24px; right: 28px; left: 28px; font-size: 8px; }
+    .demo-face .mini-name { font-size: clamp(36px,5vw,54px); }
+    .demo-face .mini-glyph { top: 29%; grid-template-columns: repeat(5, 4px); gap: 3px; }
+    .demo-face .mini-glyph i { width: 4px; height: 4px; }
+    .demo-face .mini-bottom { right: 28px; bottom: 22px; left: 28px; font-size: 7px; }
+    .demo-expand { position: absolute; z-index: 8; top: 24px; left: 28px; padding: 7px 9px; border: 1px solid rgba(255,255,255,.15); border-radius: 7px; background: rgba(255,255,255,.06); color: rgba(255,255,255,.72); cursor: pointer; font: 8px var(--mono); letter-spacing: .12em; }
+    .demo-expand:hover { background: white; color: #15161a; }
+    .demo-hint { padding: 8px 12px; border-radius: 99px; background: rgba(248,247,243,.74); color: #555854; font: 8px var(--mono); letter-spacing: .08em; box-shadow: 0 8px 22px rgba(31,33,31,.12); }
+    .demo-spotlight { width: min(620px,72vw); overflow: hidden; border: 1px solid rgba(255,255,255,.55); border-radius: 16px; background: rgba(246,246,244,.82); box-shadow: 0 25px 54px -30px rgba(20,21,23,.5); backdrop-filter: blur(28px); }
+    .demo-spot-head { display: grid; height: 54px; grid-template-columns: 24px minmax(0,1fr) auto auto; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid rgba(31,33,31,.1); color: #77736c; }
+    .demo-spot-head strong { color: #918e87; font-size: 15px; font-weight: 430; }
+    .demo-cruise, .demo-swipe { border: 0; background: transparent; cursor: pointer; }
+    .demo-cruise { padding: 7px 10px; border-left: 1px solid var(--line); color: #6e6e73; font-size: 10px; }
+    .demo-cruise:hover { color: var(--blue); }
+    .demo-swipe { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; color: #777; font: 8px var(--mono); }
+    .demo-now { display: grid; gap: 0; padding: 9px 17px 12px; }
+    .demo-now-head { display: flex; align-items: baseline; gap: 9px; height: 29px; color: #77736c; font-size: 10px; }
+    .demo-now-head b { color: #4b4b49; font-size: 11px; }
+    .demo-now-row { display: grid; height: 42px; grid-template-columns: 24px 48px 1fr auto; align-items: center; gap: 9px; border-top: 1px solid rgba(31,33,31,.09); color: #7c7972; font-size: 9px; }
+    .demo-now-row i { width: 18px; height: 18px; border-radius: 5px; background: #dedcd6; }
+    .demo-now-row strong { color: #30312f; font-size: 10px; }
+    .demo-sky { position: absolute; inset: 0; opacity: 0; pointer-events: none; transform: scale(.985); transition: opacity 240ms ease, transform 480ms var(--ease); }
+    .player-window[data-step="sky"] .demo-home, .player-window[data-step="detail"] .demo-home { opacity: 0; pointer-events: none; }
+    .player-window[data-step="sky"] .demo-sky, .player-window[data-step="detail"] .demo-sky { opacity: 1; pointer-events: auto; transform: none; }
+    .demo-sky .sky-title { top: 22px; left: 26px; font-size: 9px; }
+    .demo-sky .sky-modes { top: 18px; }
+    .demo-sky .sky-modes span { padding: 6px 17px; font-size: 9px; }
+    .demo-sky .sky-3d { top: 18px; right: 24px; padding: 6px 12px; font-size: 8px; }
+    .demo-sky .sky-legend { bottom: 24px; left: 26px; font-size: 8px; }
+    .demo-sky .sky-help { right: 26px; bottom: 24px; font-size: 8px; }
+    .demo-sky .back-pill { bottom: 20px; padding: 8px 13px; font-size: 9px; cursor: pointer; }
+    .demo-star { position: absolute; z-index: 7; top: 49%; left: 61%; width: 28px; height: 28px; border: 0; border-radius: 50%; background: radial-gradient(circle,#b9c6ff 0 3px,rgba(143,166,255,.42) 4px,rgba(143,166,255,.1) 8px,transparent 13px); cursor: pointer; transform: translate(-50%,-50%); }
+    .demo-star:hover { box-shadow: 0 0 24px rgba(143,166,255,.6); }
+    .demo-sky .evidence-panel { right: 28px; bottom: 48px; width: 390px; padding: 16px 18px; border-radius: 13px; opacity: 0; transform: translateY(10px); transition: 220ms var(--ease); }
+    .player-window[data-step="detail"] .demo-sky .evidence-panel { opacity: 1; transform: none; }
+    .demo-sky .evidence-head { font-size: 8px; padding-bottom: 10px; }
+    .demo-sky .evidence-panel p { margin: 13px 0 10px; font-size: 15px; }
+    .demo-sky .evidence-meta, .demo-sky .evidence-actions { font-size: 8px; }
+    .expanding-map { position: absolute; z-index: 25; top: 50%; left: 50%; width: min(540px,62vw); aspect-ratio: 1.586; overflow: hidden; border: 1px solid rgba(255,255,255,.18); border-radius: 21px; background: radial-gradient(85% 70% at 50% 46%,rgba(75,85,148,.2),transparent 67%),#0c0d12; opacity: 0; pointer-events: none; transform: translate(-50%,-60%); }
+    .player-window.transitioning .expanding-map { animation: shared-expand 720ms var(--ease) both; }
+    @keyframes shared-expand {
+      0% { opacity: 1; top: 50%; width: min(540px,62vw); border-radius: 21px; transform: translate(-50%,-60%); }
+      100% { opacity: 1; top: 0; width: 100%; height: 100%; border-radius: 0; transform: translate(-50%,0); }
+    }
+    .expanding-map svg { width: 100%; height: 100%; }
+    .expanding-map line { stroke: rgba(176,188,255,.25); stroke-width: .6; }
+    .expanding-map circle { fill: #adbaff; }
+
+    @media (max-width: 920px) {
+      .topbar { grid-template-columns: 1fr auto; }
+      .flow-key { display: none; }
+      .brand-copy span { max-width: 170px; }
+      .canvas { padding-left: 38px; }
+      .player { padding: 12px; }
+      .player-window { width: calc(100vw - 24px); height: calc(100vh - 24px); }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="brand-copy"><strong>Persome · 8.13 交互对齐</strong><span>CLAIM CARD → HOME → CHAT / REWIND / SKY</span></span>
+    </div>
+    <div class="flow-key" aria-label="核心流程">
+      <span class="active">领取卡片</span><i></i><span>日常 Home</span><i></i><span>Chat / Sessions</span><i></i><span>Rewind / Sky</span>
+    </div>
+    <div class="toolbar">
+      <button id="zoom-out" class="tool-button" type="button" aria-label="缩小">−</button>
+      <button id="zoom-readout" class="tool-button zoom-readout" type="button">100%</button>
+      <button id="zoom-in" class="tool-button" type="button" aria-label="放大">＋</button>
+      <button id="fit-flow" class="tool-button" type="button">定位完整流程</button>
+      <button id="play-flow" class="play-button" type="button"><i></i>播放交互</button>
+      <button id="play-chat" class="play-button chat-play-button" type="button"><i></i>播放 Chat</button>
+      <button id="play-unified" class="play-button chat-play-button" type="button"><i></i>播放完整流程</button>
+    </div>
+  </header>
+
+  <main id="viewport" class="viewport">
+    <div id="canvas" class="canvas">
+      <div class="board">
+        <section class="board-intro">
+          <div>
+            <div class="eyebrow">Verified against V5 preview · 127.0.0.1:8772</div>
+            <h1>把所有交互收进<em>一条用户旅程</em>，<br>每一步只回答一个问题。</h1>
+            <p>首次领取并揭幕 Personal Card；回访直接进入 Home。用户从 Home 开始 Chat，展开历史 Session，通过证据回到 Rewind，再进入 Memory Sky，最后在 My Card 中完成分享、Identity 与 Agent 授权。</p>
+          </div>
+          <aside class="verdict">
+            <strong>产品判断</strong>
+            <p>唯一流程从领取卡片走到 Agent Result，并最终回到 Home。领取与 Reveal 仅首次发生；Chat、Session、Rewind、Sky 和 My Card 都是同一条旅程中的连续步骤。</p>
+          </aside>
+        </section>
+
+        <section id="core-flow">
+          <div class="lane-heading"><span>AS-IS PREVIEW</span><h2>当前 8772 Preview 的真实主流程</h2><small>以下文案、入口与返回行为均按实际页面验证</small></div>
+          <div class="core-lane">
+            <article class="frame-wrap">
+              <div class="frame-meta"><div><strong>00 · Welcome Dossier</strong><small>应用加载后的第一屏，不是日常 Home</small></div><span class="frame-chip state">OPENING OVERLAY</span></div>
+              <div class="frame" data-frame="00" data-title="Welcome · Dossier" data-note="竖向封面写着 tap to open；它更像 onboarding 的揭幕仪式。">
+                <div class="opening-screen"><span class="opening-title">WHO AM I</span><div class="dossier"><div class="dossier-meta"><span>№ 001</span><span>SINCE 2026</span></div></div><span class="opening-hint">tap to open</span></div>
+              </div>
+              <div class="frame-note"><b>0</b><span>当前代码每次页面重新加载都从这里开始；产品上应改为“首次创建后一次性出现”。</span></div>
+            </article>
+
+            <div class="connector"><small>点击 dossier<br>open 1150ms</small><i class="arrow"></i></div>
+
+            <article class="frame-wrap">
+              <div class="frame-meta"><div><strong>01 · Daily Home</strong><small>横向 Card + Spotlight / Now</small></div><span class="frame-chip page">HOME</span></div>
+              <div class="frame" data-frame="01" data-title="Daily Home" data-note="Preview 中可见的星空主入口位于 Spotlight 右侧：✦ 巡星。">
+                <div class="product-screen">
+                  <div class="product-bar"><span class="asterisk">✳</span><strong>Who Am I</strong><span class="bar-spacer"></span><span class="live-dot"></span><span>Persome · 已连接</span><span class="hamburger">☰</span><span>as of now</span></div>
+                  <div class="home-area">
+                    <div class="mini-card-shell"><div class="mini-card"><div class="mini-face"><div class="mini-top"><span>№ 001</span><span>AUGUST / 2026</span></div><div class="mini-glyph" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="mini-name">@cecilia</div><div class="mini-bottom"><span>IDENTITY<br><b>PERSONAL MODEL</b></span><span>ONE OF ONE<br><b>pm.app/cecilia</b></span></div></div></div></div>
+                    <div class="quickbox"><div class="quickbox-head"><b>⌕</b><b>继续 Personal Card</b><span style="border:1px solid #d96b42;border-radius:4px;padding:4px 6px;color:#b05232">✦ 巡星</span></div><div class="quick-lines"><div class="quick-line"><i></i><b></b><small>昨天</small></div><div class="quick-line"><i></i><b style="width:76%"></b><small>现在</small></div><div class="quick-line"><i></i><b style="width:64%"></b><small>明天</small></div></div></div>
+                  </div>
+                </div>
+              </div>
+              <div class="flow-fact"><i></i><span>实测尺寸：Card 430×271；Spotlight 620×323。交互重心其实已经在 Now，而不是卡片。</span></div>
+            </article>
+
+            <div class="connector primary"><small>点击「✦ 巡星」<br>view = sky</small><i class="arrow"></i></div>
+
+            <article class="frame-wrap">
+              <div class="frame-meta"><div><strong>02 · Memory Sky / Overview</strong><small>当前是淡入 + bloom，不是卡片放大</small></div><span class="frame-chip page">SKY</span></div>
+              <div class="frame" data-frame="02" data-title="Memory Sky · Overview" data-note="点击巡星直接进入 Memory Sky；顶部保留星座、星尘、时间和 3D。">
+                <div class="sky-screen"><span class="sky-title">MEMORY SKY · 3,266 · LIVE · 本机模型</span><div class="sky-modes"><span class="active">星座</span><span>星尘</span><span>时间</span></div><span class="sky-3d">3D ⤢</span><div class="constellation"><svg viewBox="0 0 500 354" aria-hidden="true"><line x1="250" y1="162" x2="135" y2="114"/><line x1="135" y1="114" x2="82" y2="157"/><line x1="250" y1="162" x2="339" y2="91"/><line x1="339" y1="91" x2="405" y2="130"/><line x1="250" y1="162" x2="357" y2="240"/><line x1="357" y1="240" x2="296" y2="283"/><circle class="root" cx="250" cy="162" r="3.5"/><circle cx="135" cy="114" r="3"/><circle cx="82" cy="157" r="2.1"/><circle cx="339" cy="91" r="2.8"/><circle cx="405" cy="130" r="2"/><circle cx="357" cy="240" r="2.8"/><circle cx="296" cy="283" r="1.8"/><text x="107" y="91">本地优先 · 隐私 · 可追溯</text><text class="sub" x="131" y="101">144 observations</text><text x="305" y="66">先通过真实原型验证</text><text class="sub" x="337" y="76">135 observations</text></svg></div><span class="sky-legend">星 = 记忆段 · 线 = 同一件事 · 星座 = 主题</span><span class="sky-help">亮星可点 · ← → 巡星 · 点星座名回到那几天</span><button class="back-pill" type="button"><i></i>回到卡</button></div>
+              </div>
+              <div class="frame-note"><b>2</b><span>底部「回到卡」回到 Home；从巡星进入时，Card 仍然是正面。</span></div>
+            </article>
+
+            <div class="connector"><small>点击一颗亮星<br>select evidence</small><i class="arrow"></i></div>
+
+            <article class="frame-wrap">
+              <div class="frame-meta"><div><strong>03 · Memory Sky / Evidence</strong><small>同一 Sky 页的详情状态</small></div><span class="frame-chip state">SKY · SELECTED</span></div>
+              <div class="frame" data-frame="03" data-title="Memory Sky · Evidence" data-note="选择亮星后在底部显示详情，可查看出处、改写、行动或分享。">
+                <div class="sky-screen"><span class="sky-title">MEMORY SKY · 3,266 · LIVE · 本机模型</span><div class="sky-modes"><span class="active">星座</span><span>星尘</span><span>时间</span></div><span class="sky-3d">3D ⤢</span><div class="constellation"><svg viewBox="0 0 500 354" aria-hidden="true"><line x1="250" y1="162" x2="135" y2="114"/><line x1="250" y1="162" x2="339" y2="91"/><line x1="250" y1="162" x2="357" y2="240"/><circle class="root" cx="250" cy="162" r="3.5"/><circle cx="135" cy="114" r="3"/><circle cx="339" cy="91" r="2.8"/><circle cx="357" cy="240" r="2.8"/></svg></div><i class="selected-ring"></i><aside class="evidence-panel"><div class="evidence-head"><span>FACE · RECENT PATTERN</span><span>×</span></div><p>倾向先通过真实原型验证产品感觉，再逐步补齐完整度。</p><span class="evidence-meta">真实事件 · 可回溯</span><div class="evidence-actions"><span>出处</span><span>改写</span><span>行动</span><span>分享 ↗</span></div></aside><button class="back-pill" type="button"><i></i>回到卡</button></div>
+              </div>
+              <div class="frame-note"><b>3</b><span>这里不是第三个页面，而是 Sky 的 node-selected 状态。</span></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="secondary">
+          <div class="lane-heading"><span>ALTERNATE BRANCH</span><h2>卡片背面也能去星空，但它不是 Preview 的最短主路径</h2><small>Home 内的可探索支线</small></div>
+          <div class="secondary-grid">
+            <article class="entry-card"><div class="entry-kicker"><span>HOME</span><span>CARD FRONT</span></div><h3>点击横向 Personal Card</h3><p>只在 Home 内执行 3D 翻面，不发生路由切换。Spotlight / Now 仍然留在下方。</p><div class="spotlight-mock"><b>@cecilia · Personal Model</b><span>click to flip</span></div></article>
+            <i class="small-connector"></i>
+            <article class="entry-card"><div class="entry-kicker"><span>HOME</span><span>CARD BACK</span></div><h3>点击「✦ 展开星空」</h3><p>这是第二个星空入口。它和 `✦ 巡星`进入同一个 Sky，但返回时会保留卡片背面。</p><div class="menu-mock"><span class="active">✦ 展开星空</span><span>AS OF NOW</span><span>← → 巡星</span></div></article>
+            <i class="small-connector"></i>
+            <div class="route-target"><div><strong>同一个 Memory Sky</strong><p>现状没有 shared-element 放大；只是 `view = sky` 后播放 bloom。若产品册要写“展开”，必须标注这是后续优化，不是当前 Preview。</p></div></div>
+          </div>
+        </section>
+
+        <section class="interaction-audit">
+          <div class="lane-heading"><span>AS-IS COVERAGE</span><h2>原 Who Am I 工程的交互盘点</h2><small>避免只围绕 Card → Sky，漏掉真正存在的页面与状态</small></div>
+          <div class="audit-grid">
+            <article class="audit-card"><div class="audit-head"><span>01 · FIRST RUN</span><span class="audit-status">CURRENT</span></div><h3>Setup · 创建 Personal Card</h3><p>填写姓名、Handle、Tagline，保存卡片身份；必要时继续安装本机 Personal Model 与授权。</p><div class="audit-route"><b>未准备</b><i></i><span>Setup</span><i></i><span>Model ready</span></div></article>
+            <article class="audit-card"><div class="audit-head"><span>02 · OPENING OVERLAY</span><span class="audit-status">CURRENT</span></div><h3>Dossier · 揭幕，不是领取</h3><p>单击一次打开黑色卡套，露出姓名、Tagline 与会员编号；1150ms 后遮罩自动消失。</p><div class="audit-route"><b>tap to open</b><i></i><span>Inner Card</span><i></i><span>Home</span></div></article>
+            <article class="audit-card"><div class="audit-head"><span>03 · ASK</span><span class="audit-status">CURRENT</span></div><h3>问这张卡 · 单轮回答</h3><p>Spotlight 输入后打开居中浮层；只有一个 ans 状态，新问题覆盖旧回答，关闭后清空。</p><div class="audit-route"><b>Spotlight</b><i></i><span>Ask overlay</span><i></i><span>1 answer</span></div></article>
+            <article class="audit-card"><div class="audit-head"><span>04 · REWIND</span><span class="audit-status">CURRENT</span></div><h3>时间 · 月历 → 每日文档</h3><p>按日期查看 Face、Volume、Root、值得回去的瞬间、应用活动、当天卡片与证据。</p><div class="audit-route"><b>回到某一天</b><i></i><span>Month</span><i></i><span>Day</span></div></article>
+            <article class="audit-card"><div class="audit-head"><span>05 · MEMORY SKY</span><span class="audit-status">CURRENT</span></div><h3>巡星 · 证据与改写</h3><p>星座、星尘、时间三种视图；点亮星打开证据，可溯源、改写、行动或分享。</p><div class="audit-route"><b>✦ 巡星</b><i></i><span>Sky</span><i></i><span>Evidence</span></div></article>
+            <article class="audit-card"><div class="audit-head"><span>06 · MODEL PASS</span><span class="audit-status">CURRENT</span></div><h3>Swipe · Agent 连接与结果页</h3><p>把 Personal Card 刷给 Claude/GPT，查看佩戴状态、其他 Agent、页面结果与引用依据。</p><div class="audit-route"><b>Swipe</b><i></i><span>Connectors</span><i></i><span>Reports</span></div></article>
+            <article class="audit-card"><div class="audit-head"><span>07 · SHARE</span><span class="audit-status">CURRENT</span></div><h3>公开卡 · 分享与导出</h3><p>展示 Public Cut，支持社交平台、复制链接、存图；这里才是卡片对外传播的场景。</p><div class="audit-route"><b>分享这张卡</b><i></i><span>Public Card</span><i></i><span>Export</span></div></article>
+            <article class="audit-card"><div class="audit-head"><span>08 · IDENTITY</span><span class="audit-status">CURRENT</span></div><h3>My Page · 身份详情</h3><p>从分享卡进入 Identity，查看自我介绍、模型在线状态、Today 与本周 Letter。</p><div class="audit-route"><b>My Page</b><i></i><span>Identity</span><i></i><span>Share Card</span></div></article>
+          </div>
+          <div class="audit-foot"><strong>SECONDARY STATES</strong><span>Card 正反面</span><span>Now 过去/现在/未来</span><span>Year archive</span><span>搜索记忆</span><span>Correct memory</span><span>划线分享</span><span>公开访客视角</span><span>别人问过你的 / Q&amp;A Wall</span><span>暂停记录 1 小时</span><span>切换 Personal Model</span></div>
+        </section>
+
+        <section class="proposal">
+          <div class="lane-heading"><span>PRODUCT DECISION</span><h2>建议的产品结构：卡片只负责“认识我”，首页负责“和我一起做事”</h2><small>这是建议稿，不冒充当前 Preview</small></div>
+          <div class="proposal-grid">
+            <article class="journey-panel">
+              <span class="proposal-kicker">FIRST RUN · ONLY ONCE</span>
+              <h3>首次进入：把卡片做成 onboarding 的结尾</h3>
+              <p class="proposal-copy">用户先理解 Persome、确认数据边界，再看到自己的 Personal Card；卡片是“模型已经创建”的凭证，不是沟通界面。</p>
+              <div class="journey-track">
+                <div class="journey-step once"><i>01</i><span><b>欢迎与价值</b><small>Persome 如何认识我、能帮我什么</small></span><em>WELCOME</em></div>
+                <div class="journey-step"><i>02</i><span><b>数据与权限</b><small>本机、私密、来源可见、随时撤回</small></span><em>CONSENT</em></div>
+                <div class="journey-step"><i>03</i><span><b>创建 Personal Model</b><small>建立第一批记忆与身份</small></span><em>BUILD</em></div>
+                <div class="journey-step"><i>04</i><span><b>揭幕 Personal Card</b><small>确认模型身份，允许分享或授权</small></span><em>REVEAL</em></div>
+                <div class="journey-step"><i>05</i><span><b>开始使用 Persome</b><small>明确 CTA，进入日常 Home</small></span><em>ENTER</em></div>
+              </div>
+              <div class="return-rule"><i></i><span>回访用户跳过 01—04，Launch 后直接进入日常 Home。</span></div>
+            </article>
+
+            <article class="recommended-panel">
+              <div class="recommended-home">
+                <div class="product-bar"><span class="asterisk">✳</span><strong>Persome</strong><span class="bar-spacer"></span><span class="live-dot"></span><span>本机模型 · 已连接</span><span class="my-card-entry"><i></i>我的卡片</span></div>
+                <div class="daily-core">
+                  <h4>现在想做什么？</h4>
+                  <p>首页直接承接提问、继续任务和回到过去，不再陈列一张大名片。</p>
+                  <div class="ask-box"><span>⌕</span><b>问 Persome，或继续上次的事情…</b><button type="button">✦ 巡星</button><button class="primary" type="button">开始</button></div>
+                  <div class="now-cards">
+                    <div class="now-card"><small>PAST · 昨天</small><b>查看 Personal Card 的上一版</b><span>回到当时 ↗</span></div>
+                    <div class="now-card"><small>NOW · 现在</small><b>继续 8.13 产品交互对齐</b><span>继续 ↗</span></div>
+                    <div class="now-card"><small>NEXT · 明天</small><b>把下一步开发交给 Codex</b><span>开始 ↗</span></div>
+                  </div>
+                </div>
+                <span class="home-callout">PROPOSED · RETURNING HOME</span>
+              </div>
+            </article>
+
+            <article class="card-role-panel">
+              <span class="proposal-kicker">MY CARD · SECONDARY OBJECT</span>
+              <h3>横向卡片：身份凭证，不是首页</h3>
+              <p class="proposal-copy">从头像或“我的卡片”进入；只在需要确认身份、管理权限、对外分享时出现。</p>
+              <div class="role-card-preview"><div class="mini-top"><span>№ 001</span><span>AUGUST / 2026</span></div><div class="mini-name">@cecilia</div><div class="mini-bottom"><span>IDENTITY<br><b>PERSONAL MODEL</b></span><span>ONE OF ONE<br><b>pm.app/cecilia</b></span></div></div>
+              <div class="role-actions"><span>查看模型身份</span><span>权限与数据</span><span>分享 / 授权</span></div>
+              <div class="role-boundary">边界：不承载持续对话，不作为每次启动后的主视觉；翻卡看星图仅保留为探索彩蛋/支线。产品稿中 Sky 的「回到卡」应改成「回到首页」。</div>
+            </article>
+          </div>
+        </section>
+
+        <section class="chat-flow">
+          <div class="lane-heading"><span>PROPOSED CHAT FLOW</span><h2>补齐 Chat Session：记录“说过什么”，不要和 Rewind 混在一起</h2><small>当前 Preview 未实现 · 点击右上角「播放 Chat」体验</small></div>
+          <div class="chat-lane">
+            <article class="frame-wrap">
+              <div class="frame-meta"><div><strong>04 · Chat Entry</strong><small>Home 上有两个明确入口</small></div><span class="frame-chip state">PROPOSED</span></div>
+              <div class="frame chat-frame" data-frame="04" data-title="Chat · Entry" data-note="Spotlight 新建会话；Now 的继续项恢复最近 Session。">
+                <div class="mini-chat"><div class="mini-chat-bar"><b>✳ Persome</b><span class="grow"></span><span>本机模型 · 已连接</span><span class="mini-chat-button">我的卡片</span></div><div class="mini-home-entry"><div class="mini-home-stack"><h4>现在想聊什么？</h4><p>提问会创建 Session；查看过去发生的事仍然进入 Rewind。</p><div class="mini-ask-entry"><b>问 Persome，或搜索记忆…</b><span>开始 Chat</span></div><div class="mini-continue-card"><i></i><span><b>继续 Personal Card</b><small>最近 Session · 8 分钟前</small></span></div></div></div></div>
+              </div>
+              <div class="frame-note"><b>4</b><span>Spotlight 不再只是一次性问答；提交后进入独立 Chat Workspace。</span></div>
+            </article>
+
+            <div class="connector primary"><small>输入问题<br>create session</small><i class="arrow"></i></div>
+
+            <article class="frame-wrap">
+              <div class="frame-meta"><div><strong>05 · Active Session</strong><small>消息追加，不覆盖上一条</small></div><span class="frame-chip state">PROPOSED</span></div>
+              <div class="frame chat-frame" data-frame="05" data-title="Chat · Active Session" data-note="连续消息、证据引用与改写入口属于同一个 Session。">
+                <div class="mini-chat"><div class="mini-chat-bar"><span class="mini-chat-button">☰ Sessions</span><span class="grow"></span><b>继续 Personal Card</b><span class="grow"></span><span>Personal Model</span></div><div class="mini-chat-body"><div class="mini-session-drawer"></div><div class="mini-thread"><div class="mini-thread-title"><b>继续 Personal Card</b><span>TODAY · 3 MESSAGES</span></div><div class="mini-message user">这个卡片到底是什么？</div><div class="mini-message model">它更适合作为模型身份凭证，而不是日常对话首页。<div class="mini-cites"><span>Rewind · Aug 7</span><span>Face · product craft</span></div></div><div class="mini-message user">那日常入口应该放什么？</div><div class="mini-compose"><span>继续这个 Session…</span><i>↑</i></div></div></div></div>
+              </div>
+              <div class="frame-note"><b>5</b><span>回答下面保留 Evidence chips；Rewind 只作为引用来源，不替代 Session。</span></div>
+            </article>
+
+            <div class="connector"><small>点击 Sessions<br>expand drawer</small><i class="arrow"></i></div>
+
+            <article class="frame-wrap">
+              <div class="frame-meta"><div><strong>06 · Sessions Drawer</strong><small>按会话组织，不按记忆日期组织</small></div><span class="frame-chip state">PROPOSED</span></div>
+              <div class="frame chat-frame" data-frame="06" data-title="Chat · Sessions Drawer" data-note="抽屉列出今天、昨天和过去 7 天的 Chat；主线程保留在右侧。">
+                <div class="mini-chat drawer"><div class="mini-chat-bar"><span class="mini-chat-button">☰ Sessions</span><span class="grow"></span><b>继续 Personal Card</b><span class="grow"></span><span>Personal Model</span></div><div class="mini-chat-body"><aside class="mini-session-drawer"><div class="mini-session-inner"><span class="mini-session-label">TODAY</span><div class="mini-session-item active">继续 Personal Card<small>3 messages · 8m</small></div><span class="mini-session-label">YESTERDAY</span><div class="mini-session-item">8.13 产品交互对齐<small>12 messages</small></div><div class="mini-session-item">Personal Card 上一版<small>6 messages</small></div></div></aside><div class="mini-thread"><div class="mini-thread-title"><b>继续 Personal Card</b><span>TODAY · ACTIVE</span></div><div class="mini-message user">历史会话在哪里？</div><div class="mini-message model">Sessions 记录聊天；Rewind 记录生活与工作的时间证据。</div><div class="mini-compose"><span>继续这个 Session…</span><i>↑</i></div></div></div></div>
+              </div>
+              <div class="frame-note"><b>6</b><span>抽屉从 Workspace 左侧展开；不覆盖成新的“卡片背面”。</span></div>
+            </article>
+
+            <div class="connector"><small>选择昨天<br>restore context</small><i class="arrow"></i></div>
+
+            <article class="frame-wrap">
+              <div class="frame-meta"><div><strong>07 · Restored Session</strong><small>恢复完整多轮上下文</small></div><span class="frame-chip state">PROPOSED</span></div>
+              <div class="frame chat-frame" data-frame="07" data-title="Chat · Restored Session" data-note="选择历史会话后替换主线程，保留消息顺序与引用证据。">
+                <div class="mini-chat drawer"><div class="mini-chat-bar"><span class="mini-chat-button">☰ Sessions</span><span class="grow"></span><b>8.13 产品交互对齐</b><span class="grow"></span><span>Yesterday</span></div><div class="mini-chat-body"><aside class="mini-session-drawer"><div class="mini-session-inner"><span class="mini-session-label">TODAY</span><div class="mini-session-item">继续 Personal Card<small>3 messages</small></div><span class="mini-session-label">YESTERDAY</span><div class="mini-session-item active">8.13 产品交互对齐<small>12 messages</small></div><div class="mini-session-item">Personal Card 上一版<small>6 messages</small></div></div></aside><div class="mini-thread"><div class="mini-thread-title"><b>8.13 产品交互对齐</b><span>YESTERDAY · 12 MESSAGES</span></div><div class="mini-message user">先梳理页面顺序。</div><div class="mini-message model">首次是 Setup → Reveal → Home；回访直接进入 Home。<div class="mini-cites"><span>Decision · onboarding</span></div></div><div class="mini-message user">星空从哪里进入？</div><div class="mini-compose"><span>继续昨天的 Session…</span><i>↑</i></div></div></div></div>
+              </div>
+              <div class="frame-note"><b>7</b><span>历史会话恢复后可以直接继续；跳转引用时才进入 Rewind 或 Memory Sky。</span></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="unified-flow" class="unified-flow">
+          <div class="lane-heading"><span>ONE COMPLETE JOURNEY</span><h2>一条流程：领取卡片 → 日常 Home → Chat → 历史 → Rewind → Sky → 分享与 Agent</h2><small>首次只走 01—02；以后启动直接落在 03</small></div>
+          <div class="unified-lane">
+            <article class="unified-wrap" data-unified-step="0">
+              <div class="unified-meta"><div><strong>01 · 领取卡片</strong><small>首次登录后 · 保存身份并分配编号</small></div><span class="frame-chip state">CURRENT · PARTIAL</span></div>
+              <div class="unified-screen">
+                <div class="unified-toolbar"><b>✳ Persome</b><span class="grow"></span><span>YOUR PERSONAL MODEL</span></div>
+                <div class="setup-mini"><div class="setup-panel"><em>YOUR PERSONAL MODEL · THIS MAC</em><h4>先让这张卡成为你的。</h4><p>填写身份，并确认本机数据、权限与 Personal Model。</p><div class="setup-fields"><span>你的名字</span><span>@handle</span><span>你正在做什么</span></div><div class="setup-cta">创建我的 Personal Card</div><div class="setup-result">完成后：你的卡已经创建 · № 编号已生成</div></div></div>
+              </div>
+              <div class="unified-note"><b>1</b><span>这就是领取动作：保存 Profile，同时生成 modelId、№ 编号与 glyph；Preview 按钮仍写“创建”。</span></div>
+            </article>
+            <div class="unified-connector"><small>创建完成<br>reveal</small><i class="arrow"></i></div>
+
+            <article class="unified-wrap" data-unified-step="1">
+              <div class="unified-meta"><div><strong>02 · Reveal</strong><small>Dossier 揭幕 · 只出现一次</small></div><span class="frame-chip state">FIRST RUN</span></div>
+              <div class="unified-screen"><div class="reveal-mini"><div class="dossier reveal-cover"><div class="dossier-meta"><span>№ 001</span><span>SINCE 2026</span></div></div><div class="reveal-inner"><b>Cecilia</b><span>Building a model of myself</span><span>member №001</span></div></div></div>
+              <div class="unified-note"><b>2</b><span>点击只是打开卡套并确认身份；不是领取，也不创建数据。</span></div>
+            </article>
+            <div class="unified-connector"><small>开始使用<br>enter home</small><i class="arrow"></i></div>
+
+            <article class="unified-wrap" data-unified-step="2">
+              <div class="unified-meta"><div><strong>03 · Home</strong><small>回访用户从这里开始</small></div><span class="frame-chip page">DAILY</span></div>
+              <div class="unified-screen"><div class="unified-toolbar"><b>✳ Persome</b><span class="grow"></span><span>本机模型 · 已连接</span><span class="unified-chip">我的卡片</span></div><div class="unified-home"><div class="home-card-mini"><b>@cecilia</b><span>PERSONAL MODEL</span></div><div class="home-command-mini"><div class="home-command-head"><b>问 Persome，或搜索记忆…</b><span>✦ 巡星</span></div><div class="home-now-mini"><div><small>PAST</small><b>上一版</b></div><div><small>NOW</small><b>继续 Session</b></div><div><small>NEXT</small><b>交给 Agent</b></div></div></div></div></div>
+              <div class="unified-note"><b>3</b><span>Home 是唯一中枢：问、继续、回看、巡星、我的卡片都从这里进入。</span></div>
+            </article>
+            <div class="unified-connector"><small>输入问题<br>start chat</small><i class="arrow"></i></div>
+
+            <article class="unified-wrap" data-unified-step="3">
+              <div class="unified-meta"><div><strong>04 · Chat</strong><small>多轮对话 · 同一 Session</small></div><span class="frame-chip state">PROPOSED</span></div>
+              <div class="unified-screen"><div class="unified-toolbar"><span class="unified-chip">☰ Sessions</span><span class="grow"></span><b>继续 Personal Card</b><span class="grow"></span><span>Personal Model</span></div><div class="unified-chat"><div class="unified-thread"><h4>继续 Personal Card</h4><div class="unified-bubble user">卡片到底是什么？</div><div class="unified-bubble ai">它是身份凭证，不是日常首页。<div class="unified-evidence"><span>Rewind · Aug 7</span><span>Face · product</span></div></div><div class="unified-bubble user">那首页放什么？</div><div class="unified-compose">继续这个 Session…</div></div></div></div>
+              <div class="unified-note"><b>4</b><span>消息持续追加；回答可引用 Rewind 或 Memory Sky 的证据。</span></div>
+            </article>
+            <div class="unified-connector"><small>展开 Sessions<br>restore</small><i class="arrow"></i></div>
+
+            <article class="unified-wrap" data-unified-step="4">
+              <div class="unified-meta"><div><strong>05 · Session History</strong><small>恢复以前聊过的上下文</small></div><span class="frame-chip state">PROPOSED</span></div>
+              <div class="unified-screen"><div class="unified-toolbar"><span class="unified-chip">☰ Sessions</span><span class="grow"></span><b>8.13 产品交互对齐</b><span class="grow"></span><span>Yesterday</span></div><div class="unified-chat has-side"><aside class="unified-chat-side"><div class="unified-chat-side-inner"><small>TODAY</small><span>继续 Personal Card</span><small>YESTERDAY</small><span class="active">8.13 产品交互对齐</span><span>Card 上一版</span></div></aside><div class="unified-thread"><h4>8.13 产品交互对齐</h4><div class="unified-bubble user">先梳理页面顺序。</div><div class="unified-bubble ai">首次是 Setup → Reveal → Home；回访直接进入 Home。</div><div class="unified-compose">继续昨天的 Session…</div></div></div></div>
+              <div class="unified-note"><b>5</b><span>Session 历史记录“说过什么”；下一步点证据回到“发生过什么”。</span></div>
+            </article>
+            <div class="unified-connector"><small>点证据<br>open rewind</small><i class="arrow"></i></div>
+
+            <article class="unified-wrap" data-unified-step="5">
+              <div class="unified-meta"><div><strong>06 · Rewind</strong><small>按天查看记忆与来源</small></div><span class="frame-chip page">CURRENT</span></div>
+              <div class="unified-screen"><div class="unified-toolbar"><span>‹ Month</span><span class="grow"></span><b>Rewind</b><span class="grow"></span><span>Thursday, August 7</span></div><div class="rewind-mini"><em>REWIND · MEMORY DOCUMENT</em><h4>Thursday, August 7</h4><p>今天的你一直在删除不属于这件产品的东西。</p><div class="rewind-row"><span>FACE · 面</span><b>你在保护产品的感觉</b><i>溯源 ↗</i></div><div class="rewind-row"><span>ROOT · 根</span><b>不是简洁，而是想靠近的感觉</b><i>✦ 证据</i></div><div class="rewind-row"><span>00:07</span><b>Personal Card · 实时内容</b><i>回到画面</i></div></div></div>
+              <div class="unified-note"><b>6</b><span>Rewind 是某一天的事实文档；点击“✦ 证据”进入全局记忆关系。</span></div>
+            </article>
+            <div class="unified-connector"><small>✦ 证据<br>open sky</small><i class="arrow"></i></div>
+
+            <article class="unified-wrap" data-unified-step="6">
+              <div class="unified-meta"><div><strong>07 · Memory Sky</strong><small>解释为什么这样理解我</small></div><span class="frame-chip page">CURRENT</span></div>
+              <div class="unified-screen"><div class="sky-screen"><span class="sky-title">MEMORY SKY · 3,266 · LIVE</span><div class="sky-modes"><span class="active">星座</span><span>星尘</span><span>时间</span></div><div class="constellation"><svg viewBox="0 0 390 278" aria-hidden="true"><line x1="195" y1="134" x2="96" y2="82"/><line x1="195" y1="134" x2="280" y2="72"/><line x1="195" y1="134" x2="292" y2="201"/><circle class="root" cx="195" cy="134" r="4"/><circle cx="96" cy="82" r="3"/><circle cx="280" cy="72" r="3"/><circle cx="292" cy="201" r="3"/><text x="55" y="66">保护产品感觉</text><text x="252" y="52">真实原型验证</text></svg></div><aside class="evidence-panel" style="width:180px"><div class="evidence-head"><span>FACE · PATTERN</span><span>×</span></div><p>倾向先通过真实原型验证产品感觉。</p><div class="evidence-actions"><span>出处</span><span>改写</span><span>分享</span></div></aside></div></div>
+              <div class="unified-note"><b>7</b><span>选择亮星查看出处、改写或分享；完成探索后回到 Home。</span></div>
+            </article>
+            <div class="unified-connector"><small>回到 Home<br>open my card</small><i class="arrow"></i></div>
+
+            <article class="unified-wrap" data-unified-step="7">
+              <div class="unified-meta"><div><strong>08 · My Card</strong><small>身份、分享与授权动作</small></div><span class="frame-chip page">CURRENT</span></div>
+              <div class="unified-screen"><div class="unified-toolbar"><span>← Home</span><span class="grow"></span><b>My Card</b><span class="grow"></span><span>PUBLIC CUT</span></div><div class="card-actions-mini"><div class="share-card-mini"><small>№ 001 · ONE OF ONE</small><p>今天的你在保护产品的感觉，而不是增加功能。</p></div><div class="card-action-list"><span>查看 Identity</span><span>复制链接 / 存图</span><span class="primary">Swipe 给 Agent</span></div></div></div>
+              <div class="unified-note"><b>8</b><span>卡片只在需要身份、分享、权限或 Agent 授权时出现。</span></div>
+            </article>
+            <div class="unified-connector"><small>Swipe<br>agent work</small><i class="arrow"></i></div>
+
+            <article class="unified-wrap" data-unified-step="8">
+              <div class="unified-meta"><div><strong>09 · Agent Result</strong><small>带着同一个我继续工作</small></div><span class="frame-chip page">CURRENT</span></div>
+              <div class="unified-screen"><div class="unified-toolbar"><span>← My Card</span><span class="grow"></span><b>Swipe your card</b><span class="grow"></span><span>MODEL PASS</span></div><div class="agent-mini"><div class="agent-pass"><div><b>YOUR CARD</b><br><br>@cecilia</div><i>SWIPE</i><div><b>AGENTS</b><br><br>● Claude<br>● GPT</div></div><div class="agent-report"><b>继续 Personal Card · Context</b><span>GPT 已把本次读取整理成一页可以继续使用的上下文。</span></div></div></div>
+              <div class="unified-note"><b>9</b><span>查看 Agent 佩戴状态和结果页；完成后回到 Home，整条旅程闭环。</span></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="specs">
+          <article class="spec-card"><h3>这张“卡”到底是什么</h3><p>不要再让一个 Card 同时承担四个职责。建议拆清楚：</p><div class="meaning-grid"><div><b>WELCOME</b><span>竖向 dossier：首次欢迎与模型诞生仪式。</span></div><div><b>IDENTITY</b><span>横向 Personal Card：我的模型身份与权限摘要。</span></div><div><b>SHARE</b><span>公开/授权给人或 Agent 的可携带对象。</span></div></div></article>
+          <article class="spec-card"><h3>首次用户：卡片可以是 onboarding</h3><div class="checklist"><div><i>1</i><span>欢迎：解释 Persome 会如何认识我</span></div><div><i>2</i><span>权限与数据范围：本机、私密、可撤回</span></div><div><i>3</i><span>创建并揭幕 Personal Card</span></div><div><i>4</i><span>明确 CTA：「开始使用 Persome」</span></div><div><i>5</i><span>以后不再自动播放 dossier</span></div></div></article>
+          <article class="spec-card"><h3>回访用户：不要一直看自己的名片</h3><div class="route-code"><div><code>Launch</code><span>直接进入 Quick Box / Now</span></div><div><code>Primary</code><span>问、搜、继续、回到某一天</span></div><div><code>Explore</code><span>✦ 巡星进入模型解释空间</span></div><div><code>My Card</code><span>头像/菜单中随时查看、分享、授权</span></div></div></article>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <aside id="selection-info" class="selection-info" aria-live="polite"><b id="selection-index">00</b><span><strong id="selection-title">Welcome · Dossier</strong><small id="selection-note">首次揭幕 Personal Model 的欢迎封面。</small></span></aside>
+
+  <div id="player" class="player" hidden>
+    <section id="player-window" class="player-window" data-step="cover" aria-label="V5 Preview 当前交互演示">
+      <header class="player-head"><strong id="player-label">STEP 0 · 欢迎封面</strong><div class="player-steps" aria-hidden="true"><i class="active"></i><i></i><i></i><i></i></div><button id="player-close" class="player-close" type="button" aria-label="关闭">×</button></header>
+      <div class="player-stage">
+        <div id="demo-opening" class="demo-opening"><span class="opening-title">WHO AM I</span><div class="dossier"><div class="dossier-meta"><span>№ 001</span><span>SINCE 2026</span></div></div><span class="opening-hint">tap to open</span></div>
+        <div class="demo-home">
+          <div class="demo-stack">
+            <div class="demo-card-shell"><div id="demo-card" class="demo-card"><article class="demo-face">
+              <div class="mini-top"><span>№ 001</span><span>AUGUST / 2026</span></div><div class="mini-glyph" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="mini-name">@cecilia</div><div class="mini-bottom"><span>IDENTITY<br><b>PERSONAL MODEL</b></span><span>ONE OF ONE<br><b>pm.app/cecilia</b></span></div>
+            </article><article class="demo-face back-face"><div class="back-map"><svg viewBox="0 0 540 340" aria-hidden="true"><line x1="270" y1="154" x2="160" y2="112"/><line x1="270" y1="154" x2="362" y2="91"/><line x1="270" y1="154" x2="386" y2="231"/><line x1="160" y1="112" x2="92" y2="175"/><line x1="362" y1="91" x2="448" y2="136"/><circle class="hot" cx="270" cy="154" r="5"/><circle class="hot" cx="160" cy="112" r="4"/><circle cx="92" cy="175" r="2.2"/><circle class="hot" cx="362" cy="91" r="4"/><circle cx="448" cy="136" r="2.2"/><circle class="hot" cx="386" cy="231" r="4"/><circle cx="318" cy="285" r="2"/></svg></div><button id="demo-expand" class="demo-expand" type="button">✦ 展开星空</button><span class="back-label" style="top:26px;right:28px;font-size:8px">AS OF NOW</span><span class="back-count" style="right:28px;bottom:22px;font-size:8px">3,266 MEMORIES</span></article></div></div>
+            <div class="demo-spotlight"><div class="demo-spot-head"><span>⌕</span><strong>继续 Personal Card</strong><button id="demo-cruise" class="demo-cruise" type="button">✦ 巡星</button><button class="demo-swipe" type="button">Swipe your card</button></div><div class="demo-now"><div class="demo-now-head"><b>Now</b><span>过去 · 现在 · 未来</span></div><div class="demo-now-row"><i></i><span>↶ 过去</span><strong>Personal Card 的上一版</strong><span>昨天</span></div><div class="demo-now-row"><i></i><span>— 现在</span><strong>继续 Personal Card</strong><span>现在</span></div><div class="demo-now-row"><i></i><span>○ 未来</span><strong>把开发任务交给 Codex</strong><span>明天</span></div></div></div>
+            <span id="demo-hint" class="demo-hint">卡片可翻面；Preview 的最短入口是 Spotlight「✦ 巡星」</span>
+          </div>
+        </div>
+        <div class="demo-sky sky-screen">
+          <span class="sky-title">MEMORY SKY · 3,266 · LIVE · 本机模型</span><div class="sky-modes"><span class="active">星座</span><span>星尘</span><span>时间</span></div><span class="sky-3d">3D ⤢</span>
+          <div class="constellation"><svg viewBox="0 0 1000 700" aria-hidden="true"><line x1="500" y1="330" x2="270" y2="215"/><line x1="270" y1="215" x2="160" y2="310"/><line x1="500" y1="330" x2="680" y2="180"/><line x1="680" y1="180" x2="820" y2="265"/><line x1="500" y1="330" x2="720" y2="480"/><line x1="720" y1="480" x2="590" y2="575"/><line x1="500" y1="330" x2="300" y2="505"/><circle class="root" cx="500" cy="330" r="8"/><circle cx="270" cy="215" r="7"/><circle cx="160" cy="310" r="5"/><circle cx="680" cy="180" r="7"/><circle cx="820" cy="265" r="5"/><circle cx="720" cy="480" r="7"/><circle cx="590" cy="575" r="5"/><circle cx="300" cy="505" r="6"/><circle class="dim" cx="180" cy="95" r="3"/><circle class="dim" cx="385" cy="115" r="3"/><circle class="dim" cx="880" cy="120" r="3"/><circle class="dim" cx="870" cy="540" r="3"/><text x="220" y="175" style="font-size:14px">persome</text><text class="sub" x="220" y="194" style="font-size:9px">42h · 19 段</text><text x="655" y="135" style="font-size:14px">product craft</text><text class="sub" x="655" y="154" style="font-size:9px">6h · 8 段</text><text x="700" y="535" style="font-size:14px">release flow</text></svg></div>
+          <button id="demo-star" class="demo-star" type="button" aria-label="选择星点"></button><aside class="evidence-panel"><div class="evidence-head"><span>FACE · RECENT PATTERN</span><span>×</span></div><p>倾向先通过真实原型验证产品感觉，再逐步补齐完整度。</p><span class="evidence-meta">真实事件 · 可回溯</span><div class="evidence-actions"><span>出处</span><span>改写</span><span>行动</span><span>分享 ↗</span></div></aside>
+          <span class="sky-legend">星 = 记忆段 · 线 = 同一件事 · 星座 = 主题</span><span class="sky-help">亮星可点 · ← → 巡星 · 点星座名回到那几天</span><button id="demo-back" class="back-pill" type="button"><i></i>回到卡</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="chat-player" class="player" hidden>
+    <section id="chat-player-window" class="chat-player-window" aria-label="Proposed Chat Session 交互演示">
+      <header class="chat-appbar">
+        <div class="chat-appbar-left"><button id="chat-home" type="button">← Home</button><button id="chat-toggle" type="button">☰ Sessions</button></div>
+        <div style="display:grid;justify-items:center;gap:2px"><strong id="chat-title">继续 Personal Card</strong><small id="chat-subtitle">TODAY · ACTIVE SESSION</small></div>
+        <div class="chat-appbar-right"><small>PROPOSED · NOT IN PREVIEW</small><button id="chat-player-close" type="button" aria-label="关闭 Chat 演示">×</button></div>
+      </header>
+      <div class="chat-app-body">
+        <aside class="chat-sidebar">
+          <div class="chat-sidebar-inner">
+            <button id="chat-new" class="chat-new" type="button">＋ 新建 Chat</button>
+            <span class="chat-group-label">TODAY</span>
+            <button class="chat-session-item active" type="button" data-session="product"><b>继续 Personal Card</b><span>3 messages · 8 分钟前</span></button>
+            <span class="chat-group-label">YESTERDAY</span>
+            <button class="chat-session-item" type="button" data-session="alignment"><b>8.13 产品交互对齐</b><span>12 messages · 昨天</span></button>
+            <button class="chat-session-item" type="button" data-session="previous"><b>Personal Card 的上一版</b><span>6 messages · 昨天</span></button>
+            <span class="chat-group-label">PREVIOUS 7 DAYS</span>
+            <button class="chat-session-item" type="button" data-session="release"><b>发布流程确认</b><span>9 messages · 8 月 7 日</span></button>
+          </div>
+        </aside>
+        <main class="chat-main">
+          <div id="chat-scroll" class="chat-scroll"><div id="chat-messages"></div></div>
+          <form id="chat-form" class="chat-composer"><input id="chat-input" type="text" autocomplete="off" placeholder="继续这个 Session…"><button id="chat-send" type="submit" aria-label="发送">↑</button></form>
+        </main>
+      </div>
+    </section>
+  </div>
+
+  <div id="unified-player" class="player" hidden>
+    <section class="unified-player-window" aria-label="Persome 完整用户旅程演示">
+      <header class="unified-player-head"><strong id="unified-player-title">01 · 领取卡片</strong><span id="unified-player-subtitle">首次登录后 · 保存身份并分配编号</span><button id="unified-player-close" type="button" aria-label="关闭完整流程">×</button></header>
+      <div id="unified-stage" class="unified-stage"></div>
+      <footer class="unified-player-foot"><button id="unified-prev" type="button">← 上一步</button><div id="unified-progress" class="unified-progress" aria-label="流程进度"></div><button id="unified-next" type="button">下一步 →</button></footer>
+    </section>
+  </div>
+
+  <script>
+    const $ = (selector, root = document) => root.querySelector(selector);
+    const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+    const viewport = $("#viewport");
+    const canvas = $("#canvas");
+    const coreFlow = $("#unified-flow");
+    const zoomReadout = $("#zoom-readout");
+    const selectionInfo = $("#selection-info");
+    let zoom = 1;
+    let selectionTimer = 0;
+
+    function applyZoom(next) {
+      zoom = Math.max(.55, Math.min(1.35, next));
+      canvas.style.zoom = zoom;
+      zoomReadout.textContent = `${Math.round(zoom * 100)}%`;
+    }
+
+    function focusCore() {
+      const targetX = Math.max(0, (coreFlow.offsetLeft - 46) * zoom);
+      const targetY = Math.max(0, (coreFlow.offsetTop - 26) * zoom);
+      viewport.scrollTo({ left: targetX, top: targetY, behavior: "smooth" });
+    }
+
+    $("#zoom-out").addEventListener("click", () => applyZoom(zoom - .1));
+    $("#zoom-in").addEventListener("click", () => applyZoom(zoom + .1));
+    zoomReadout.addEventListener("click", () => applyZoom(1));
+    $("#fit-flow").addEventListener("click", focusCore);
+
+    $$(".frame").forEach((frame) => {
+      frame.addEventListener("click", () => {
+        $$(".frame.selected").forEach((item) => item.classList.remove("selected"));
+        frame.classList.add("selected");
+        $("#selection-index").textContent = frame.dataset.frame;
+        $("#selection-title").textContent = frame.dataset.title;
+        $("#selection-note").textContent = frame.dataset.note;
+        selectionInfo.classList.add("show");
+        clearTimeout(selectionTimer);
+        selectionTimer = window.setTimeout(() => selectionInfo.classList.remove("show"), 4600);
+      });
+    });
+
+    const player = $("#player");
+    const playerWindow = $("#player-window");
+    const playerLabel = $("#player-label");
+    const playerSteps = $$(".player-steps i");
+    const demoCard = $("#demo-card");
+    const demoHint = $("#demo-hint");
+    let skyOrigin = "cruise";
+
+    const stepMeta = {
+      cover: ["STEP 0 · 欢迎封面", 0],
+      home: ["STEP 1 · 日常 Home / 点击「✦ 巡星」", 1],
+      sky: ["STEP 2 · Memory Sky", 2],
+      detail: ["STEP 3 · 证据详情", 3]
+    };
+
+    function setDemoStep(step) {
+      playerWindow.dataset.step = step;
+      const [label, index] = stepMeta[step];
+      playerLabel.textContent = label;
+      playerSteps.forEach((item, itemIndex) => item.classList.toggle("active", itemIndex <= index));
+      demoHint.textContent = step === "home" ? "卡片可翻面；Preview 的最短入口是 Spotlight「✦ 巡星」" : "";
+    }
+
+    function openPlayer() {
+      player.hidden = false;
+      demoCard.classList.remove("back");
+      skyOrigin = "cruise";
+      setDemoStep("cover");
+    }
+
+    function closePlayer() {
+      player.hidden = true;
+    }
+
+    $("#play-flow").addEventListener("click", openPlayer);
+    $("#player-close").addEventListener("click", closePlayer);
+    player.addEventListener("click", (event) => { if (event.target === player) closePlayer(); });
+    $("#demo-opening").addEventListener("click", () => setDemoStep("home"));
+    demoCard.addEventListener("click", () => {
+      if (playerWindow.dataset.step === "home") demoCard.classList.toggle("back");
+    });
+    $("#demo-cruise").addEventListener("click", () => {
+      skyOrigin = "cruise";
+      demoCard.classList.remove("back");
+      setDemoStep("sky");
+    });
+    $("#demo-expand").addEventListener("click", (event) => {
+      event.stopPropagation();
+      skyOrigin = "card";
+      setDemoStep("sky");
+    });
+    $("#demo-star").addEventListener("click", () => setDemoStep("detail"));
+    $("#demo-back").addEventListener("click", () => {
+      if (skyOrigin === "cruise") demoCard.classList.remove("back");
+      setDemoStep("home");
+    });
+
+    const chatPlayer = $("#chat-player");
+    const chatPlayerWindow = $("#chat-player-window");
+    const chatMessages = $("#chat-messages");
+    const chatScroll = $("#chat-scroll");
+    const chatTitle = $("#chat-title");
+    const chatSubtitle = $("#chat-subtitle");
+    const chatInput = $("#chat-input");
+    let activeChatSession = "product";
+
+    const chatSessions = {
+      product: {
+        title: "继续 Personal Card",
+        subtitle: "TODAY · ACTIVE SESSION",
+        messages: [
+          { role: "user", text: "这个卡片到底是什么？" },
+          { role: "assistant", text: "它更适合作为 Personal Model 的身份凭证，而不是日常对话首页。首次揭幕属于 onboarding；回访用户直接进入 Home。", evidence: ["Rewind · Aug 7", "Face · product craft"] },
+          { role: "user", text: "那日常入口应该放什么？" },
+          { role: "assistant", text: "Home 应该优先承接 Ask、Now、继续任务和巡星。卡片降级到“我的卡片”，只在查看身份、权限、分享与授权时出现。", evidence: ["Decision · returning home"] }
+        ]
+      },
+      alignment: {
+        title: "8.13 产品交互对齐",
+        subtitle: "YESTERDAY · 12 MESSAGES",
+        messages: [
+          { role: "user", text: "先把所有页面顺序梳理一下。" },
+          { role: "assistant", text: "首次用户是 Setup → Reveal → Home；回访用户直接进入 Home。Home 再分流到 Chat、Rewind、Memory Sky、Swipe、Share。", evidence: ["Flow · onboarding", "Flow · navigation"] },
+          { role: "user", text: "星空从哪里进入？" },
+          { role: "assistant", text: "当前 Preview 的最短入口是 Spotlight 右侧的“✦ 巡星”；翻卡后的“展开星空”是第二条支线。", evidence: ["Preview · spotlightSky"] }
+        ]
+      },
+      previous: {
+        title: "Personal Card 的上一版",
+        subtitle: "YESTERDAY · 6 MESSAGES",
+        messages: [
+          { role: "user", text: "上一版为什么看起来像一直在看自己的名片？" },
+          { role: "assistant", text: "因为横向卡片占据 Home 的主视觉，同时 Spotlight 位于下方，导致身份展示压过了日常操作。", evidence: ["Rewind · previous card"] },
+          { role: "user", text: "保留什么？" },
+          { role: "assistant", text: "保留身份、分享、授权和翻卡探索；移除它作为每次启动后的主视觉职责。" }
+        ]
+      },
+      release: {
+        title: "发布流程确认",
+        subtitle: "AUG 7 · 9 MESSAGES",
+        messages: [
+          { role: "user", text: "发布前还缺什么？" },
+          { role: "assistant", text: "需要确认 Preview 交互、真实数据边界、回滚方式和端到端验证结果。", evidence: ["Root · release flow"] }
+        ]
+      },
+      draft: { title: "新 Chat", subtitle: "TODAY · UNSAVED", messages: [] }
+    };
+
+    function appendChatMessage(message) {
+      const item = document.createElement("div");
+      item.className = `chat-message ${message.role}`;
+      item.textContent = message.text;
+      if (message.role === "assistant") {
+        const meta = document.createElement("span");
+        meta.className = "chat-message-meta";
+        meta.textContent = "Persome · Personal Model";
+        item.appendChild(meta);
+      }
+      if (Array.isArray(message.evidence) && message.evidence.length) {
+        const cites = document.createElement("div");
+        cites.className = "chat-evidence";
+        message.evidence.forEach((label) => {
+          const chip = document.createElement("span");
+          chip.textContent = label;
+          cites.appendChild(chip);
+        });
+        item.appendChild(cites);
+      }
+      chatMessages.appendChild(item);
+    }
+
+    function renderChatSession(key) {
+      activeChatSession = key;
+      const session = chatSessions[key];
+      chatTitle.textContent = session.title;
+      chatSubtitle.textContent = session.subtitle;
+      chatMessages.replaceChildren();
+      if (!session.messages.length) {
+        const empty = document.createElement("div");
+        empty.className = "chat-empty";
+        const wrap = document.createElement("span");
+        const title = document.createElement("strong");
+        title.textContent = "开始一个新的 Session";
+        const copy = document.createElement("span");
+        copy.textContent = "Chat 保存你和 Persome 说过什么；Rewind 保存那一天发生过什么。";
+        wrap.append(title, copy);
+        empty.appendChild(wrap);
+        chatMessages.appendChild(empty);
+      } else {
+        const heading = document.createElement("div");
+        heading.className = "chat-thread-heading";
+        const title = document.createElement("h2");
+        title.textContent = session.title;
+        const sub = document.createElement("p");
+        sub.textContent = session.subtitle;
+        heading.append(title, sub);
+        chatMessages.appendChild(heading);
+        session.messages.forEach(appendChatMessage);
+      }
+      $$(".chat-session-item").forEach((item) => item.classList.toggle("active", item.dataset.session === key));
+      window.setTimeout(() => { chatScroll.scrollTop = chatScroll.scrollHeight; }, 20);
+    }
+
+    function openChatPlayer() {
+      chatPlayer.hidden = false;
+      chatPlayerWindow.classList.remove("sidebar-open");
+      renderChatSession("product");
+      window.setTimeout(() => chatInput.focus(), 80);
+    }
+
+    function closeChatPlayer() {
+      chatPlayer.hidden = true;
+    }
+
+    $("#play-chat").addEventListener("click", openChatPlayer);
+    $("#chat-player-close").addEventListener("click", closeChatPlayer);
+    $("#chat-home").addEventListener("click", closeChatPlayer);
+    $("#chat-toggle").addEventListener("click", () => chatPlayerWindow.classList.toggle("sidebar-open"));
+    $("#chat-new").addEventListener("click", () => {
+      chatSessions.draft.messages = [];
+      renderChatSession("draft");
+      chatPlayerWindow.classList.remove("sidebar-open");
+      chatInput.focus();
+    });
+    $$(".chat-session-item").forEach((item) => item.addEventListener("click", () => renderChatSession(item.dataset.session)));
+    $("#chat-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const value = chatInput.value.trim();
+      if (!value) return;
+      const session = chatSessions[activeChatSession];
+      session.messages.push({ role: "user", text: value });
+      chatInput.value = "";
+      renderChatSession(activeChatSession);
+      window.setTimeout(() => {
+        session.messages.push({ role: "assistant", text: "这个交互原型先保留完整 Session 上下文；真实答案未来由 Personal Model 返回，并附上可跳转到 Rewind 或 Memory Sky 的证据。", evidence: ["Prototype · session context"] });
+        renderChatSession(activeChatSession);
+      }, 420);
+    });
+
+    const unifiedPlayer = $("#unified-player");
+    const unifiedStage = $("#unified-stage");
+    const unifiedTitle = $("#unified-player-title");
+    const unifiedSubtitle = $("#unified-player-subtitle");
+    const unifiedPrev = $("#unified-prev");
+    const unifiedNext = $("#unified-next");
+    const unifiedProgress = $("#unified-progress");
+    const unifiedSteps = $$("[data-unified-step]");
+    let unifiedIndex = 0;
+
+    unifiedSteps.forEach(() => {
+      const dot = document.createElement("i");
+      unifiedProgress.appendChild(dot);
+    });
+
+    function renderUnifiedStep(index) {
+      unifiedIndex = Math.max(0, Math.min(unifiedSteps.length - 1, index));
+      const source = unifiedSteps[unifiedIndex];
+      const meta = $(".unified-meta", source);
+      const screen = $(".unified-screen", source);
+      unifiedTitle.textContent = $("strong", meta).textContent;
+      unifiedSubtitle.textContent = $("small", meta).textContent;
+      unifiedStage.replaceChildren();
+      const copy = screen.cloneNode(true);
+      copy.classList.add("unified-stage-copy");
+      unifiedStage.appendChild(copy);
+      $$("i", unifiedProgress).forEach((dot, dotIndex) => dot.classList.toggle("active", dotIndex <= unifiedIndex));
+      unifiedPrev.disabled = unifiedIndex === 0;
+      unifiedNext.textContent = unifiedIndex === unifiedSteps.length - 1 ? "完成 · 回到 Home" : "下一步 →";
+    }
+
+    function openUnifiedPlayer() {
+      unifiedPlayer.hidden = false;
+      renderUnifiedStep(0);
+    }
+
+    function closeUnifiedPlayer() {
+      unifiedPlayer.hidden = true;
+    }
+
+    $("#play-unified").addEventListener("click", openUnifiedPlayer);
+    $("#unified-player-close").addEventListener("click", closeUnifiedPlayer);
+    unifiedPrev.addEventListener("click", () => renderUnifiedStep(unifiedIndex - 1));
+    unifiedNext.addEventListener("click", () => {
+      if (unifiedIndex === unifiedSteps.length - 1) closeUnifiedPlayer();
+      else renderUnifiedStep(unifiedIndex + 1);
+    });
+    unifiedPlayer.addEventListener("click", (event) => { if (event.target === unifiedPlayer) closeUnifiedPlayer(); });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !player.hidden) closePlayer();
+      if (event.key === "Escape" && !chatPlayer.hidden) closeChatPlayer();
+      if (event.key === "Escape" && !unifiedPlayer.hidden) closeUnifiedPlayer();
+    });
+
+    window.addEventListener("load", () => {
+      applyZoom(window.innerWidth < 1180 ? .75 : .9);
+      window.setTimeout(focusCore, 80);
+    });
+  </script>
+</body>
+</html>
